@@ -66,8 +66,9 @@ describe('Bailian micro-frontend real-world benchmark', () => {
         return
       }
 
-      expect(markdown.length).toBeGreaterThan(100)
+      expect(markdown.length).toBeGreaterThan(1000)
       expect(markdown).toMatch(/qwen|通义千问|百炼/i)
+      expect(markdown).toMatch(/Qwen3\.8|179|模型/i)
     } finally {
       await provider.dispose()
     }

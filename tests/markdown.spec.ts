@@ -154,4 +154,78 @@ describe('htmlToMarkdown', () => {
     const { markdown } = htmlToMarkdown('<p>hello</p>', 'https://example.com/x')
     expect(markdown.toLowerCase()).toContain('hello')
   })
+
+  it('does not discard <main> content when carousel/banner <article> tags exist', () => {
+    const page = `<!doctype html><html><head><title>Model Catalog</title></head><body>
+<nav>Header Nav</nav>
+<main>
+  <div class="carousel">
+    <article class="slide"><h3>Banner 1</h3><p>Promo text 1</p></article>
+    <article class="slide"><h3>Banner 2</h3><p>Promo text 2</p></article>
+  </div>
+  <div class="catalog">
+    <h2>Available Models</h2>
+    <p>Qwen3.8-Max: 2.4T parameters MoE foundation model.</p>
+    <p>DeepSeek-V3: High-efficiency reasoning model.</p>
+  </div>
+</main>
+<footer>Footer</footer>
+</body></html>`
+    const { markdown, mode } = htmlToMarkdown(page, 'https://example.com/catalog')
+    expect(mode).toBe('article')
+    expect(markdown).toContain('Available Models')
+    expect(markdown).toContain('Qwen3.8-Max')
+    expect(markdown).toContain('DeepSeek-V3')
+    expect(markdown).not.toContain('Header Nav')
+    expect(markdown).not.toContain('Footer')
+  })
+
+  it('preserves multiple <article> tags on feed pages without <main>', () => {
+    const page = `<!doctype html><html><head><title>Blog</title></head><body>
+<nav>Nav</nav>
+<article><h2>Post 1</h2><p>Article 1 content here.</p></article>
+<article><h2>Post 2</h2><p>Article 2 content here.</p></article>
+<footer>Footer</footer>
+</body></html>`
+    const { markdown, mode } = htmlToMarkdown(page, 'https://example.com/blog')
+    expect(mode).toBe('article')
+    expect(markdown).toContain('Post 1')
+    expect(markdown).toContain('Article 1 content here.')
+    expect(markdown).toContain('Post 2')
+    expect(markdown).toContain('Article 2 content here.')
+    expect(markdown).not.toContain('Nav')
+    expect(markdown).not.toContain('Footer')
+  })
+
+  it('does not discard body content when an insignificant stray <article> widget exists without <main>', () => {
+    const page = `<!doctype html><html><head><title>Doc</title></head><body>
+<nav>Nav</nav>
+<div class="content-body">
+  <h2>Documentation Section</h2>
+  <p>Detailed technical documentation with lots of paragraphs and explanation for users...</p>
+</div>
+<article class="badge">Badge</article>
+<footer>Footer</footer>
+</body></html>`
+    const { markdown } = htmlToMarkdown(page, 'https://example.com/doc')
+    expect(markdown).toContain('Documentation Section')
+    expect(markdown).toContain('Detailed technical documentation')
+    expect(markdown).not.toContain('Nav')
+    expect(markdown).not.toContain('Footer')
+  })
+
+  it('recognizes role="main" or id="main" when <main> tag is omitted', () => {
+    const page = `<!doctype html><html><head><title>App</title></head><body>
+<div class="sidebar">Sidebar noise</div>
+<div role="main">
+  <h2>Dashboard</h2>
+  <p>Main analytics content here.</p>
+</div>
+</body></html>`
+    const { markdown, mode } = htmlToMarkdown(page, 'https://example.com/app')
+    expect(mode).toBe('article')
+    expect(markdown).toContain('Dashboard')
+    expect(markdown).toContain('Main analytics content here.')
+    expect(markdown).not.toContain('Sidebar noise')
+  })
 })

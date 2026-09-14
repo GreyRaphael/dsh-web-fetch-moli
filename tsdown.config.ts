@@ -108,6 +108,10 @@ export default [
     fixedExtension: false,
     dts: false,
     clean: false,
+    deps: {
+      alwaysBundle: ['linkedom', '@mozilla/readability', '@mdream/js'],
+      neverBundle: ['mdream'],
+    },
   },
   clientBundle('client.js'),
 ] satisfies UserConfig[]
