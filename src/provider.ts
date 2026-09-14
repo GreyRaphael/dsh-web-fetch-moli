@@ -19,7 +19,7 @@ import { DEFAULT_MAX_CONCURRENCY_CDP, DEFAULT_MAX_CONCURRENCY_CLI, DEFAULT_MAX_C
 import type { ResolvedConfig } from './config.ts'
 import { CdpConnectionPool } from './cdp-pool.ts'
 import type { CdpConnect, CdpLease } from './cdp-pool.ts'
-import { setupPageHooks, triggerSentinels } from './hooks.ts'
+import { getIoCount, getSentinelCount, setupPageHooks, triggerSentinels } from './hooks.ts'
 import { htmlToMarkdown } from './markdown.ts'
 import { MoliProcessManager } from './moli-process.ts'
 import { resolveCdpBackend, resolveMoliBinary } from './moli-resolve.ts'
@@ -54,7 +54,7 @@ const SETTLE_MS = 3_000
 const CLOSE_GRACE_MS = 2_000
 
 /** Maximum rounds of sentinel trigger flips for infinite-scroll/lazy-load pages. */
-const MAX_SENTINEL_ROUNDS = 8
+const MAX_SENTINEL_ROUNDS = 10
 
 /** Render session for one CDP fetch. */
 export interface MoliBrowserSession {
@@ -414,12 +414,65 @@ export class MoliFetchProvider implements WebFetchProvider {
 
   /** Run bounded rounds of sentinel visibility flips to load infinite cards. */
   private async runSentinelRounds(page: PlaywrightPage, deadline: Deadline): Promise<void> {
-    await sleep(800)
+    // 1. Initial grace period for scripts to execute and instantiate observers
+    await sleep(Math.min(800, deadline.remainingMs()))
+
+    // If IntersectionObserver was never instantiated on this page, give one short retry
+    // for slow SPA entry bundles. If still 0, exit early since static/non-lazy pages have no sentinels.
+    let ioCount = await getIoCount(page)
+    if (ioCount === 0) {
+      await sleep(Math.min(400, deadline.remainingMs()))
+      ioCount = await getIoCount(page)
+      if (ioCount === 0) return
+    }
+
+    // 2. Wait for sentinel elements to mount into the DOM (e.g. async micro-frontend components)
+    const waitStart = Date.now()
+    const maxSentinelWaitMs = 3_500
+    let sentinelCount = await getSentinelCount(page)
+
+    while (sentinelCount === 0 && Date.now() - waitStart < maxSentinelWaitMs) {
+      if (deadline.remainingMs() < 3_000) break
+      await sleep(Math.min(300, deadline.remainingMs()))
+      sentinelCount = await getSentinelCount(page)
+    }
+
+    if (sentinelCount === 0) {
+      // Try one immediate trigger attempt in case sentinels bypassed counting
+      const fallbackTriggered = await triggerSentinels(page)
+      if (fallbackTriggered === 0) return
+    }
+
+    // 3. Trigger sentinel rounds until catalog is exhausted or MAX_SENTINEL_ROUNDS reached
+    let lastContentLen = 0
+    let unchangedRounds = 0
+
     for (let round = 0; round < MAX_SENTINEL_ROUNDS; round++) {
-      if (deadline.remainingMs() < 2000) break
+      if (deadline.remainingMs() < 2_500) break
+
       const triggered = await triggerSentinels(page)
-      if (triggered === 0 && round > 0) break
-      await sleep(Math.min(1000, deadline.remainingMs()))
+      if (triggered === 0) break
+
+      // Wait for backend API response and DOM render of the new batch
+      await sleep(Math.min(1_200, deadline.remainingMs()))
+
+      // Track whether DOM content length grew
+      let currentLen = 0
+      try {
+        currentLen = typeof page.evaluate === 'function'
+          ? (await page.evaluate('document.body ? document.body.innerHTML.length : 0') as number)
+          : 0
+      } catch {
+        // Best effort
+      }
+
+      if (currentLen > 0 && currentLen === lastContentLen) {
+        unchangedRounds++
+        if (unchangedRounds >= 2) break
+      } else {
+        unchangedRounds = 0
+        lastContentLen = currentLen
+      }
     }
   }
 

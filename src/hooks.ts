@@ -17,18 +17,25 @@ export const SENTINEL_OBSERVER_INIT_SCRIPT = `
   if (window.__moliSentinelHookInstalled) return;
   window.__moliSentinelHookInstalled = true;
   window.__sentinels = new Map();
+  window.__moliIoCount = 0;
   const OrigIO = window.IntersectionObserver;
   if (!OrigIO) return;
 
   window.IntersectionObserver = function(callback, options) {
+    window.__moliIoCount++;
     const inst = new OrigIO(callback, options);
     const origObserve = inst.observe;
     const origUnobserve = inst.unobserve;
 
     inst.observe = function(el) {
-      if (el && typeof el.className === 'string' &&
-          (el.className.includes('Sentinel') || el.className.includes('sentinel') || el.className.includes('loadMore') || el.className.includes('load-more') || el.className.includes('infinite'))) {
-        window.__sentinels.set(el, { inst, callback });
+      if (el && el.nodeType === 1) {
+        const cls = typeof el.className === 'string' ? el.className : (el.getAttribute ? el.getAttribute('class') || '' : '');
+        const id = el.id || '';
+        const testStr = (cls + ' ' + id).toLowerCase();
+        const isSentinel = /(sentinel|load-?more|infinite|scroll-?trigger|bottom-?anchor|page-?end)/i.test(testStr);
+        if (isSentinel) {
+          window.__sentinels.set(el, { inst, callback });
+        }
       }
       return origObserve.call(inst, el);
     };
@@ -107,3 +114,40 @@ export async function triggerSentinels(page: PlaywrightPage): Promise<number> {
     return 0
   }
 }
+
+/**
+ * Check how many connected sentinels are currently tracked on the page.
+ */
+export async function getSentinelCount(page: PlaywrightPage): Promise<number> {
+  if (typeof page.evaluate !== 'function') return 0
+  try {
+    const count = await page.evaluate(`
+      (() => {
+        let count = 0;
+        if (window.__sentinels) {
+          for (const [el] of window.__sentinels.entries()) {
+            if (el && el.isConnected) count++;
+          }
+        }
+        return count;
+      })()
+    `)
+    return typeof count === 'number' ? count : 0
+  } catch {
+    return 0
+  }
+}
+
+/**
+ * Check if the page has instantiated any IntersectionObserver.
+ */
+export async function getIoCount(page: PlaywrightPage): Promise<number> {
+  if (typeof page.evaluate !== 'function') return 0
+  try {
+    const count = await page.evaluate('window.__moliIoCount || 0')
+    return typeof count === 'number' ? count : 0
+  } catch {
+    return 0
+  }
+}
+
