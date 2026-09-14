@@ -7,11 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.3] - 2026-09-14
+## [0.1.4] - 2026-09-14
 
-### Added
+### Changed
 
-- **Backwards-compatible `playwright` provider alias**: Added seamless fallback support for environments and profiles configured with `fetchProvider: playwright` or `DSH_WEB_FETCH_PROVIDER=playwright` (such as profiles migrating from `dsh-web-fetch-playwright`). Requests configured for `playwright` seamlessly route to Moli. The alias dynamically disables its availability when unpinned to avoid `WEB_PROVIDER_AMBIGUOUS` during auto-selection.
+- **Clean and standardized Moli provider registration**: Standardized provider identity strictly to `moli` (id: `moli`). Cleaned up legacy client radio group form names to `moli-backend`. Added Cordis integration test coverage verifying provider registration into `ctx.web`.
 
 
 ### Fixed
