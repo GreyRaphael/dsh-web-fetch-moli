@@ -35,7 +35,8 @@
     "prepare": "pnpm run build",
     "prepublishOnly": "pnpm run build",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "benchmark": "RUN_ONLINE_BENCHMARK=true vitest run tests/bailian-benchmark.spec.ts"
   },
   "dsh": {
     "bundle": {
