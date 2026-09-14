@@ -3,3 +3,7 @@
 # dependency needs one (node-gyp etc.).
 packages:
   - '.'
+
+peerDependencyRules:
+  ignoreMissing:
+    - '@deepseek-ai/*'

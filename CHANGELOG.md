@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-09-14
+
+### Fixed
+
+- **Eliminate deprecated `whatwg-encoding` subdependency warning**: Upgraded `jsdom` from `^26.0.0` to `^29.1.1`. Modern jsdom uses `@exodus/bytes` and `html-encoding-sniffer@^6.0.0`, eliminating the npm deprecation warning for `whatwg-encoding@3.1.1` during plugin installation.
+- **Mark `@deepseek-ai/dsh-settings` and `@deepseek-ai/dsh-web` optional in `peerDependenciesMeta`**: When installing the plugin into a DSH profile via `dsh plugin --profile <name> add`, pnpm no longer flags missing peer dependency warnings for host-injected services.
+- **Modernize tsdown bundling options**: Updated `tsdown.config.ts` from deprecated `external` / `noExternal` to `deps: { neverBundle, alwaysBundle }`, eliminating compiler warnings during build.
+- **Dependency updates**: Bumped `@joplin/turndown-plugin-gfm` to `^1.0.68`, `dompurify` to `^3.4.15`, and aligned devDependency `@deepseek-ai/cordis` to `4.0.2`.
+
 ## [0.1.4] - 2026-09-14
 
 ### Changed

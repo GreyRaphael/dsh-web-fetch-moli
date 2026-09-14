@@ -82,8 +82,10 @@ function clientBundle(fileName: string): UserConfig {
     dts: false,
     sourcemap: true,
     clean: false,
-    external: CLIENT_EXTERNALS,
-    noExternal: (id: string) => CLIENT_EXTERNALS.includes(id) ? undefined : true,
+    deps: {
+      neverBundle: CLIENT_EXTERNALS,
+      alwaysBundle: (id: string) => CLIENT_EXTERNALS.includes(id) ? undefined : true,
+    },
     plugins: [purityGate(), cssPlugin()],
     define: { 'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV ?? 'production') },
     outputOptions: {
