@@ -23,16 +23,33 @@ const resolvedMoliCache = new Map<string, string>()
 /**
  * Find `name` as an executable file on `$PATH`.
  *
- * @param name - executable basename (e.g. 'moli').
+ * Automatically inspects Windows `PATHEXT` (e.g. .exe, .cmd, .bat) on win32 platforms.
+ *
+ * @param name - executable basename (e.g. 'moli', 'node').
  * @returns absolute path to the binary, or undefined.
  */
 export function findOnPath(name: string): string | undefined {
   const pathValue = process.env.PATH ?? ''
+  const isWindows = process.platform === 'win32'
+  const extList = isWindows
+    ? (process.env.PATHEXT ? process.env.PATHEXT.split(';').filter(Boolean) : ['.EXE', '.CMD', '.BAT'])
+    : []
+
   for (const dir of pathValue.split(delimiter)) {
     if (dir === '') continue
-    const candidate = join(dir, name)
-    if (isExecutableFile(candidate)) {
-      return candidate
+    const candidates = [join(dir, name)]
+    if (isWindows) {
+      for (const ext of extList) {
+        if (!name.toLowerCase().endsWith(ext.toLowerCase())) {
+          candidates.push(join(dir, `${name}${ext}`))
+          candidates.push(join(dir, `${name}${ext.toLowerCase()}`))
+        }
+      }
+    }
+    for (const candidate of candidates) {
+      if (isExecutableFile(candidate)) {
+        return candidate
+      }
     }
   }
   return undefined
@@ -43,7 +60,11 @@ export function isExecutableFile(path: string): boolean {
   try {
     const stat = statSync(path)
     if (!stat.isFile()) return false
-    accessSync(path, constants.X_OK)
+    if (process.platform !== 'win32') {
+      accessSync(path, constants.X_OK)
+    } else {
+      accessSync(path, constants.F_OK)
+    }
     return true
   } catch {
     return false
@@ -87,18 +108,23 @@ export async function resolveMoliBinary(configuredPath = ''): Promise<string> {
 
   // 4. Standard local / home / system fallback locations
   const userHome = homedir()
-  const fallbackCandidates = [
-    join(userHome, '.local', 'bin', 'moli'),
-    join(userHome, '.cargo', 'bin', 'moli'),
-    join(userHome, '.cache', 'moli', 'moli'),
-    '/usr/local/bin/moli',
-    '/usr/bin/moli',
+  const isWindows = process.platform === 'win32'
+  const moliNames = isWindows ? ['moli.exe', 'moli'] : ['moli']
+  const fallbackDirs = [
+    join(userHome, '.local', 'bin'),
+    join(userHome, '.cargo', 'bin'),
+    join(userHome, '.cache', 'moli'),
+    '/usr/local/bin',
+    '/usr/bin',
   ]
 
-  for (const candidate of fallbackCandidates) {
-    if (isExecutableFile(candidate)) {
-      resolvedMoliCache.set(trimmed, candidate)
-      return candidate
+  for (const dir of fallbackDirs) {
+    for (const binName of moliNames) {
+      const candidate = join(dir, binName)
+      if (isExecutableFile(candidate)) {
+        resolvedMoliCache.set(trimmed, candidate)
+        return candidate
+      }
     }
   }
 
