@@ -1,6 +1,6 @@
 # dsh-web-fetch-moli
 
-[中文](./README.zh-CN.md) · [GitHub](https://github.com/gewei/dsh-web-fetch-moli)
+[中文](./README.zh-CN.md) · [GitHub](https://github.com/GreyRaphael/dsh-web-fetch-moli)
 
 A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) plugin providing a **Moli** backend for the `web_fetch` tool. Built on [Moli](https://github.com/lexmount/moli) (an ultra-lightweight Rust headless browser), it renders dynamic micro-frontends, single-page applications (SPAs), and static sites with **~60MB memory footprint** (>90% reduction compared to ~1GB for standard Chromium/Playwright), denoises pages via **Readability + DOMPurify**, and returns clean GitHub Flavored Markdown.
 
@@ -54,7 +54,10 @@ chmod +x ~/.local/bin/moli
 ## Installation
 
 ```sh
-# Add plugin to DSH web profile
+# Option 1: Install directly via GitHub repository
+dsh plugin --profile web add github:GreyRaphael/dsh-web-fetch-moli
+
+# Option 2: Install via npm package name
 dsh plugin --profile web add dsh-web-fetch-moli
 ```
 

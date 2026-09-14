@@ -1,6 +1,6 @@
 # dsh-web-fetch-moli
 
-[English](./README.md) · [GitHub](https://github.com/gewei/dsh-web-fetch-moli)
+[English](./README.md) · [GitHub](https://github.com/GreyRaphael/dsh-web-fetch-moli)
 
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) 官方生态插件，为内置 `web_fetch` 工具提供基于 [Moli](https://github.com/lexmount/moli)（超轻量级 Rust 无头浏览器）的渲染后端。在仅占用 **~60MB 内存**（相比 Chromium/Playwright 的 ~1GB 降低超 90%）的前提下，完美支持企业级复杂微前端（Micro-Frontend）、动态单页应用（SPA）与静态页面，并通过 **Readability + DOMPurify** 降噪清洗后输出规范的 GitHub Flavored Markdown。
 
@@ -55,7 +55,10 @@ chmod +x ~/.local/bin/moli
 ## 安装插件
 
 ```sh
-# 添加至 DSH web profile
+# 方式 1：直接通过 GitHub 仓库安装（即时可用）
+dsh plugin --profile web add github:GreyRaphael/dsh-web-fetch-moli
+
+# 方式 2：通过 npm 包名安装
 dsh plugin --profile web add dsh-web-fetch-moli
 ```
 
