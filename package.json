@@ -65,11 +65,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/gewei/dsh-web-fetch-moli.git"
+    "url": "git+https://github.com/GreyRaphael/dsh-web-fetch-moli.git"
   },
-  "homepage": "https://github.com/gewei/dsh-web-fetch-moli#readme",
+  "homepage": "https://github.com/GreyRaphael/dsh-web-fetch-moli#readme",
   "bugs": {
-    "url": "https://github.com/gewei/dsh-web-fetch-moli/issues"
+    "url": "https://github.com/GreyRaphael/dsh-web-fetch-moli/issues"
   },
   "publishConfig": {
     "access": "public"
