@@ -397,10 +397,7 @@ export class MoliFetchProvider implements WebFetchProvider {
     }
 
     // Best-effort short settle for client-rendered scripts
-    await Promise.race([
-      page.waitForLoadState?.('networkidle', { timeout: Math.min(SETTLE_MS, deadline.remainingMs()) }),
-      sleep(1000),
-    ]).catch(() => {})
+    await page.waitForLoadState?.('networkidle', { timeout: Math.min(SETTLE_MS, deadline.remainingMs()) }).catch(() => {})
 
     const html = await page.content()
     if (!config.denoise) {
@@ -428,13 +425,14 @@ export class MoliFetchProvider implements WebFetchProvider {
 
     // 2. Wait for sentinel elements to mount into the DOM (e.g. async micro-frontend components)
     const waitStart = Date.now()
-    const maxSentinelWaitMs = 3_500
+    const maxSentinelWaitMs = 10_000
     let sentinelCount = await getSentinelCount(page)
 
     while (sentinelCount === 0 && Date.now() - waitStart < maxSentinelWaitMs) {
       if (deadline.remainingMs() < 3_000) break
       await sleep(Math.min(300, deadline.remainingMs()))
       sentinelCount = await getSentinelCount(page)
+      if (sentinelCount > 0) break
     }
 
     if (sentinelCount === 0) {
@@ -454,7 +452,7 @@ export class MoliFetchProvider implements WebFetchProvider {
       if (triggered === 0) break
 
       // Wait for backend API response and DOM render of the new batch
-      await sleep(Math.min(1_200, deadline.remainingMs()))
+      await sleep(Math.min(1_500, deadline.remainingMs()))
 
       // Track whether DOM content length grew
       let currentLen = 0

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-09-14
+
+### Fixed
+
+- **Fix incomplete response on asynchronous micro-frontend and lazy-loaded SPA pages**: Extended IntersectionObserver sentinel discovery timeout (`maxSentinelWaitMs` from 3.5s to 10s) and per-round render settle time (from 1.2s to 1.5s) in `runSentinelRounds`. Added immediate early-break when sentinels mount. Enables full infinite-scroll catalog extraction on complex micro-frontend platforms (such as Alibaba Cloud Bailian Model Market, extracting all 179 model cards).
+- **Update real-world micro-frontend benchmark timeout**: Raised vitest timeout in `tests/bailian-benchmark.spec.ts` from 60s to 90s to comfortably accommodate full catalog extraction across multiple network batches.
+
 ## [0.1.5] - 2026-09-14
 
 ### Fixed

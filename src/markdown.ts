@@ -24,7 +24,7 @@ import { gfm } from '@joplin/turndown-plugin-gfm'
 
 /** Layout/noise tags DOMPurify removes outright (with their content). */
 const FORBID_TAGS = [
-  'nav', 'aside', 'header', 'footer', 'form', 'svg', 'iframe', 'noscript',
+  'nav', 'aside', 'header', 'footer', 'svg', 'iframe', 'noscript',
   'button', 'select', 'option', 'input', 'textarea', 'dialog', 'canvas',
   'video', 'audio', 'template',
 ]

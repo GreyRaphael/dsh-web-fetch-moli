@@ -11,7 +11,7 @@ import { resolveMoliBinary } from '../src/moli-resolve.ts'
 const BAILIAN_URL = 'https://bailian.console.aliyun.com/cn-beijing/model/market'
 
 describe('Bailian micro-frontend real-world benchmark', () => {
-  it('extracts cards from Alibaba Cloud Bailian under Moli CDP mode', { timeout: 60_000 }, async () => {
+  it('extracts cards from Alibaba Cloud Bailian under Moli CDP mode', { timeout: 90_000 }, async () => {
     let moliPath = ''
     try {
       moliPath = await resolveMoliBinary()
