@@ -27,7 +27,12 @@ describe('cli-runner', () => {
   })
 
   it('aborts on signal', async () => {
-    const bin = await resolveMoliBinary()
+    let bin = ''
+    try {
+      bin = await resolveMoliBinary()
+    } catch {
+      bin = process.execPath
+    }
     const controller = new AbortController()
     controller.abort()
 

@@ -30,6 +30,13 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      - name: Install Moli (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          curl -sL https://github.com/lexmount/moli/releases/download/v1.1.5/moli-x86_64-unknown-linux-gnu.tar.gz | tar -xz -C /tmp
+          sudo mv /tmp/moli-v1.1.5-x86_64-unknown-linux-gnu/moli /usr/local/bin/moli
+          moli --version
+
       - name: Test
         run: pnpm test
 
@@ -40,4 +47,4 @@ jobs:
       # piping assumes a POSIX shell, so it stays on the Linux runners.
       - name: Verify package contents
         if: matrix.os == 'ubuntu-latest'
-        run: pnpm pack --pack-destination /tmp/dsh-web-fetch-playwright-pack && tar -tzf /tmp/dsh-web-fetch-playwright-pack/*.tgz | grep -q '^package/lib/index.js$' || (echo 'lib/index.js missing from package' && exit 1)
+        run: pnpm pack --pack-destination /tmp/dsh-web-fetch-moli-pack && tar -tzf /tmp/dsh-web-fetch-moli-pack/*.tgz | grep -q '^package/lib/index.js$' || (echo 'lib/index.js missing from package' && exit 1)
