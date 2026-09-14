@@ -30,6 +30,7 @@ import { delimiter, join } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import type { CdpChromium } from './types.ts'
+import { connectCdp } from './cdp-client.ts'
 
 /** Memoized path to resolved Moli binary. */
 const resolvedMoliCache = new Map<string, string>()
@@ -308,7 +309,6 @@ export async function resolveCdpBackend(): Promise<{ chromium: CdpChromium; sour
   if (nativeClient !== undefined) {
     return { chromium: nativeClient, source: 'native WebSocket CDP client' }
   }
-  const { connectCdp } = await import('./cdp-client.ts')
   const client: CdpChromium = {
     connectOverCDP: (endpoint: string, options?: { timeout?: number }) =>
       connectCdp(endpoint, options?.timeout ?? 30000),

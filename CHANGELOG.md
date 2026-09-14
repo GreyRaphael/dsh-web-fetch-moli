@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-14
+
+### Fixed
+
+- **修复包发布缺少动态代码分块（cdp-client chunk）的问题**: 将 `src/moli-resolve.ts` 中对 `cdp-client.ts` 的引用改为静态导入，使 `lib/index.js` 单独打包为一个完整自包含的 ESM bundle；同时将 `package.json` 的 `files` 字段规范为包括完整的 `lib` 目录，避免插件打包或发布时遗漏生成的产物。
+
 ## [0.2.0] - 2026-09-14
 
 ### Changed

@@ -1,6 +1,6 @@
 {
   "name": "dsh-web-fetch-moli",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Moli (ultra-lightweight Rust headless browser) web-fetch provider for DeepSeek Harness: renders complex SPAs, micro-frontends, and static pages with ~60MB memory.",
   "type": "module",
   "license": "MIT",
@@ -21,9 +21,7 @@
     "node": ">=20"
   },
   "files": [
-    "lib/index.js",
-    "lib/client.js",
-    "lib/types/**/*.d.ts",
+    "lib",
     "src",
     "cordis.patch.yml",
     "README.md",
