@@ -44,17 +44,17 @@ const MAX_PIPELINE_INPUT_CHARS = 2_000_000
 /** How long a fetch may sit in the concurrency queue before failing fast. */
 const QUEUE_TIMEOUT_MS = 20_000
 
-/** Default per-fetch budget (ms). */
-const DEFAULT_TIMEOUT_MS = 45_000
+/** Default per-fetch budget (ms) - strictly below harness 30s tool timeout. */
+const DEFAULT_TIMEOUT_MS = 24_000
 
 /** Post-DOM settle wait (ms) so dynamic micro-frontend modules settle. */
-const SETTLE_MS = 3_000
+const SETTLE_MS = 500
 
 /** Grace period (ms) for page/context close operations. */
-const CLOSE_GRACE_MS = 2_000
+const CLOSE_GRACE_MS = 1_500
 
 /** Maximum rounds of sentinel trigger flips for infinite-scroll/lazy-load pages. */
-const MAX_SENTINEL_ROUNDS = 10
+const MAX_SENTINEL_ROUNDS = 4
 
 /** Render session for one CDP fetch. */
 export interface MoliBrowserSession {
@@ -377,6 +377,11 @@ export class MoliFetchProvider implements WebFetchProvider {
       }
     }
 
+    // Ensure dynamic SPAs settle out of loading skeleton/spinners before checking content
+    if (response === null || response.status() === 200) {
+      await this.waitForSpaHydration(page, deadline)
+    }
+
     // Dynamic SPA sentinel loading rounds (for infinite scroll / micro-frontend card lists)
     if (config.autoScrollSentinel !== false) {
       await this.runSentinelRounds(page, deadline)
@@ -409,28 +414,52 @@ export class MoliFetchProvider implements WebFetchProvider {
     return bounded !== html ? { ...result, truncated: true } : result
   }
 
+  /** Wait for client-rendered SPA containers to replace spinners/skeletons with content. */
+  private async waitForSpaHydration(page: CdpPage, deadline: Deadline): Promise<void> {
+    const hydStart = Date.now()
+    const maxWaitMs = 4_000
+    while (Date.now() - hydStart < maxWaitMs && deadline.remainingMs() > 6_000) {
+      let isUnsettled = false
+      try {
+        if (typeof page.evaluate === 'function') {
+          isUnsettled = await page.evaluate(`
+            (() => {
+              const body = document.body;
+              if (!body) return false;
+              const html = body.innerHTML;
+              const hasSpinner = html.includes("spin-dot") || html.includes("skeleton") || html.includes("loading-icon");
+              if (!hasSpinner) return false;
+              const hasCards = document.querySelectorAll("[class*='card'], [class*='item'], article, main").length > 5;
+              return !hasCards;
+            })()
+          `) as boolean
+        }
+      } catch {
+        isUnsettled = false
+      }
+      if (!isUnsettled) break
+      await sleep(Math.min(250, deadline.remainingMs()))
+    }
+  }
+
   /** Run bounded rounds of sentinel visibility flips to load infinite cards. */
   private async runSentinelRounds(page: CdpPage, deadline: Deadline): Promise<void> {
-    // 1. Initial grace period for scripts to execute and instantiate observers
-    await sleep(Math.min(800, deadline.remainingMs()))
-
-    // If IntersectionObserver was never instantiated on this page, give one short retry
-    // for slow SPA entry bundles. If still 0, exit early since static/non-lazy pages have no sentinels.
+    // 1. Check if IntersectionObserver was instantiated on this page.
     let ioCount = await getIoCount(page)
     if (ioCount === 0) {
-      await sleep(Math.min(400, deadline.remainingMs()))
+      await sleep(Math.min(300, deadline.remainingMs()))
       ioCount = await getIoCount(page)
       if (ioCount === 0) return
     }
 
     // 2. Wait for sentinel elements to mount into the DOM (e.g. async micro-frontend components)
     const waitStart = Date.now()
-    const maxSentinelWaitMs = 10_000
+    const maxSentinelWaitMs = 3_000
     let sentinelCount = await getSentinelCount(page)
 
     while (sentinelCount === 0 && Date.now() - waitStart < maxSentinelWaitMs) {
-      if (deadline.remainingMs() < 3_000) break
-      await sleep(Math.min(300, deadline.remainingMs()))
+      if (deadline.remainingMs() < 6_000) break
+      await sleep(Math.min(250, deadline.remainingMs()))
       sentinelCount = await getSentinelCount(page)
       if (sentinelCount > 0) break
     }
@@ -446,13 +475,13 @@ export class MoliFetchProvider implements WebFetchProvider {
     let unchangedRounds = 0
 
     for (let round = 0; round < MAX_SENTINEL_ROUNDS; round++) {
-      if (deadline.remainingMs() < 2_500) break
+      if (deadline.remainingMs() < 5_000) break
 
       const triggered = await triggerSentinels(page)
       if (triggered === 0) break
 
       // Wait for backend API response and DOM render of the new batch
-      await sleep(Math.min(1_500, deadline.remainingMs()))
+      await sleep(Math.min(600, deadline.remainingMs()))
 
       // Track whether DOM content length grew
       let currentLen = 0
