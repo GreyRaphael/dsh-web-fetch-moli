@@ -54,7 +54,7 @@ const SETTLE_MS = 500
 const CLOSE_GRACE_MS = 1_500
 
 /** Maximum rounds of sentinel trigger flips for infinite-scroll/lazy-load pages. */
-const MAX_SENTINEL_ROUNDS = 4
+const MAX_SENTINEL_ROUNDS = 2
 
 /** Render session for one CDP fetch. */
 export interface MoliBrowserSession {
@@ -377,11 +377,6 @@ export class MoliFetchProvider implements WebFetchProvider {
       }
     }
 
-    // Ensure dynamic SPAs settle out of loading skeleton/spinners before checking content
-    if (response === null || response.status() === 200) {
-      await this.waitForSpaHydration(page, deadline)
-    }
-
     // Dynamic SPA sentinel loading rounds (for infinite scroll / micro-frontend card lists)
     if (config.autoScrollSentinel !== false) {
       await this.runSentinelRounds(page, deadline)
@@ -414,47 +409,25 @@ export class MoliFetchProvider implements WebFetchProvider {
     return bounded !== html ? { ...result, truncated: true } : result
   }
 
-  /** Wait for client-rendered SPA containers to replace spinners/skeletons with content. */
-  private async waitForSpaHydration(page: CdpPage, deadline: Deadline): Promise<void> {
-    const hydStart = Date.now()
-    const maxWaitMs = 4_000
-    while (Date.now() - hydStart < maxWaitMs && deadline.remainingMs() > 6_000) {
-      let isUnsettled = false
-      try {
-        if (typeof page.evaluate === 'function') {
-          isUnsettled = await page.evaluate(`
-            (() => {
-              const body = document.body;
-              if (!body) return false;
-              const html = body.innerHTML;
-              const hasSpinner = html.includes("spin-dot") || html.includes("skeleton") || html.includes("loading-icon");
-              if (!hasSpinner) return false;
-              const hasCards = document.querySelectorAll("[class*='card'], [class*='item'], article, main").length > 5;
-              return !hasCards;
-            })()
-          `) as boolean
-        }
-      } catch {
-        isUnsettled = false
-      }
-      if (!isUnsettled) break
-      await sleep(Math.min(250, deadline.remainingMs()))
-    }
-  }
-
   /** Run bounded rounds of sentinel visibility flips to load infinite cards. */
   private async runSentinelRounds(page: CdpPage, deadline: Deadline): Promise<void> {
-    // 1. Check if IntersectionObserver was instantiated on this page.
+    if (typeof page.evaluate !== 'function') return
+
+    // 1. Initial grace period for scripts to execute and instantiate observers
+    await sleep(Math.min(800, deadline.remainingMs()))
+
+    // If IntersectionObserver was never instantiated on this page, give one short retry
+    // for slow SPA entry bundles. If still 0, exit early since static/non-lazy pages have no sentinels.
     let ioCount = await getIoCount(page)
     if (ioCount === 0) {
-      await sleep(Math.min(300, deadline.remainingMs()))
+      await sleep(Math.min(400, deadline.remainingMs()))
       ioCount = await getIoCount(page)
       if (ioCount === 0) return
     }
 
     // 2. Wait for sentinel elements to mount into the DOM (e.g. async micro-frontend components)
     const waitStart = Date.now()
-    const maxSentinelWaitMs = 3_000
+    const maxSentinelWaitMs = 9_000
     let sentinelCount = await getSentinelCount(page)
 
     while (sentinelCount === 0 && Date.now() - waitStart < maxSentinelWaitMs) {
@@ -481,7 +454,7 @@ export class MoliFetchProvider implements WebFetchProvider {
       if (triggered === 0) break
 
       // Wait for backend API response and DOM render of the new batch
-      await sleep(Math.min(600, deadline.remainingMs()))
+      await sleep(Math.min(500, deadline.remainingMs()))
 
       // Track whether DOM content length grew
       let currentLen = 0
