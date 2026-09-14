@@ -122,7 +122,7 @@ export function RadioGroupField(props: {
             <label className={css.radioPick}>
               <input
                 type="radio"
-                name="playwright-backend"
+                name="moli-backend"
                 value={option.value}
                 checked={props.text === option.value}
                 disabled={props.disabled}

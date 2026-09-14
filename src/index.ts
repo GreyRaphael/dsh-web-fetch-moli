@@ -7,7 +7,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-settings'
-import type {} from '@deepseek-ai/dsh-web'
+import type { WebFetchProvider } from '@deepseek-ai/dsh-web'
 import { Config } from './config.ts'
 import type { ResolvedConfig } from './config.ts'
 import { MoliFetchProvider } from './provider.ts'
@@ -72,6 +72,22 @@ export function apply(ctx: Context, config: Config): void {
   const provider = new MoliFetchProvider(() => current())
   ctx.effect(() => () => { void provider.dispose() }, 'dsh-web-fetch-moli: cleanup daemon and CDP')
   ctx.web.registerFetchProvider(provider)
+
+  // Backward compatibility alias: if 'playwright' is configured as fetchProvider
+  // (e.g. from existing profile cordis.patch.yml, env DSH_WEB_FETCH_PROVIDER=playwright,
+  // or migration from dsh-web-fetch-playwright), route it to Moli seamlessly.
+  const webRuntime = ctx.web as unknown as { fetchProviders?: Map<string, unknown> } | undefined
+  if (!webRuntime?.fetchProviders?.has?.('playwright')) {
+    const aliasProvider: WebFetchProvider = {
+      id: 'playwright',
+      available: () => {
+        const configuredId = (ctx.web as unknown as { fetchProviderId?: string })?.fetchProviderId ?? process.env.DSH_WEB_FETCH_PROVIDER
+        return configuredId === 'playwright' && provider.available()
+      },
+      fetch: (req, signal) => provider.fetch(req, signal),
+    }
+    ctx.web.registerFetchProvider(aliasProvider)
+  }
 
   // Proactively warm up / download binary in background on plugin startup
   if (config.backend !== 'cdp') {
