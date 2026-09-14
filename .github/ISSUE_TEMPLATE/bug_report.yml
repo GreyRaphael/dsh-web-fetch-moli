@@ -12,8 +12,9 @@ body:
     attributes:
       label: Backend
       options:
-        - Local Playwright
+        - Local Moli Daemon
         - Remote CDP endpoint
+        - One-shot CLI
         - Not sure
     validations:
       required: true
@@ -41,12 +42,12 @@ body:
     id: config
     attributes:
       label: Configuration
-      description: Backend selector, playwrightPath / cdpEndpoint, denoise setting (omit paths that identify you).
+      description: Backend selector, moliPath / cdpEndpoint, denoise setting (omit paths that identify you).
   - type: input
     id: version
     attributes:
       label: Plugin version
-      description: The `version` from package.json, or `npm view dsh-web-fetch-playwright version`.
+      description: The `version` from package.json, or `npm view dsh-web-fetch-moli version`.
     validations:
       required: true
   - type: input

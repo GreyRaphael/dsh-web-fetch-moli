@@ -155,7 +155,7 @@ function isHtmlMime(contentType: string): boolean {
  * Classify a navigation response from its status and headers.
  *
  * @param status - the response's HTTP status code.
- * @param headers - the response's headers (case as Playwright serves: lowercased).
+ * @param headers - the response's headers (case as CDP browser serves: lowercased).
  * @returns `'challenge'` when the response is a Cloudflare challenge, else `'none'`.
  */
 export function classifyChallengeResponse(status: number, headers: Record<string, string>): 'none' | 'challenge' {
@@ -181,7 +181,7 @@ export function classifyChallengeResponse(status: number, headers: Record<string
  * markers only as a gated fallback.
  *
  * @param status - the response's HTTP status code.
- * @param headers - the response's headers (lowercased, as Playwright serves).
+ * @param headers - the response's headers (lowercased, as CDP browser serves).
  * @returns true when the content-level fallback may run.
  */
 export function isChallengeCompatibleResponse(status: number, headers: Record<string, string>): boolean {

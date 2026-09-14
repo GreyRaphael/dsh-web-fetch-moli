@@ -14,7 +14,7 @@ import type { ResolvedConfig } from '../src/config.ts'
 import { CdpConnectionPool } from '../src/cdp-pool.ts'
 import { MoliFetchProvider, WEB_FETCH_CHALLENGE_CODE } from '../src/provider.ts'
 import type { MoliBrowserSession } from '../src/provider.ts'
-import type { PlaywrightBrowser, PlaywrightContext, PlaywrightPage, PlaywrightResponse } from '../src/types.ts'
+import type { CdpBrowser, CdpContext, CdpPage, CdpResponse } from '../src/types.ts'
 
 /** Everything a fake navigation can be told to produce. */
 interface FakePageSpec {
@@ -73,7 +73,7 @@ interface FakePageState {
   gotos: number
 }
 
-function fakeResponse(spec: FakePageSpec, entry?: NonNullable<FakePageSpec['gotoScript']>[number]): PlaywrightResponse | null {
+function fakeResponse(spec: FakePageSpec, entry?: NonNullable<FakePageSpec['gotoScript']>[number]): CdpResponse | null {
   if (spec.gotoError !== undefined) return null
   const challenge = entry?.challenge === true || (entry === undefined && spec.challenge === true)
   const headers: Record<string, string> = { 'content-type': entry?.contentType ?? spec.contentType ?? 'text/html; charset=utf-8' }
@@ -92,9 +92,9 @@ function fakeResponse(spec: FakePageSpec, entry?: NonNullable<FakePageSpec['goto
 }
 
 /** Shared page behavior: the members the provider touches, close tracking. */
-function makeFakePage(spec: FakePageSpec, state: FakePageState, popupListeners: Array<(page: PlaywrightPage) => void> = []): PlaywrightPage {
+function makeFakePage(spec: FakePageSpec, state: FakePageState, popupListeners: Array<(page: CdpPage) => void> = []): CdpPage {
   const gotoRejecters: Array<(error: Error) => void> = []
-  const responseListeners: Array<(response: PlaywrightResponse) => void> = []
+  const responseListeners: Array<(response: CdpResponse) => void> = []
   const scripted = spec.gotoScript ?? []
   let reads = 0
   let cleared = false
@@ -119,7 +119,7 @@ function makeFakePage(spec: FakePageSpec, state: FakePageState, popupListeners: 
       if (spec.emitOnClear !== undefined) {
         const emit = spec.emitOnClear
         const headers = { 'content-type': emit.contentType ?? 'text/html; charset=utf-8' }
-        const response: PlaywrightResponse = {
+        const response: CdpResponse = {
           status: () => emit.status ?? 200,
           headers: () => headers,
           text: async () => '',
@@ -131,9 +131,9 @@ function makeFakePage(spec: FakePageSpec, state: FakePageState, popupListeners: 
     }
   }
 
-  const page: PlaywrightPage = {
-    goto: (): Promise<PlaywrightResponse | null> => {
-      // A closed page rejects navigation, like a real Playwright page.
+  const page: CdpPage = {
+    goto: (): Promise<CdpResponse | null> => {
+      // A closed page rejects navigation, like a real browser page.
       if (state.pageClosed) return Promise.reject(new Error('Target closed'))
       if (spec.gotoError !== undefined) return Promise.reject(spec.gotoError)
       if (spec.hangGoto === true) {
@@ -157,9 +157,9 @@ function makeFakePage(spec: FakePageSpec, state: FakePageState, popupListeners: 
       for (const reject of gotoRejecters.splice(0)) reject(new Error('Target closed'))
     },
     route: async () => {},
-    on: (event: 'popup' | 'response', listener: ((page: PlaywrightPage) => void) | ((response: PlaywrightResponse) => void)) => {
-      if (event === 'popup') popupListeners.push(listener as (page: PlaywrightPage) => void)
-      else responseListeners.push(listener as (response: PlaywrightResponse) => void)
+    on: (event: 'popup' | 'response', listener: ((page: CdpPage) => void) | ((response: CdpResponse) => void)) => {
+      if (event === 'popup') popupListeners.push(listener as (page: CdpPage) => void)
+      else responseListeners.push(listener as (response: CdpResponse) => void)
     },
     ...(spec.noEvaluate === true ? {} : {
       evaluate: async (): Promise<unknown> => {
@@ -176,12 +176,12 @@ function fakeSession(spec: FakePageSpec): MoliBrowserSession {
   const pageState: FakePageState = { pageClosed: false, gotos: 0 }
   const closed = { context: false, browser: false }
   const page = makeFakePage(spec, pageState)
-  const context: PlaywrightContext = {
+  const context: CdpContext = {
     newPage: async () => page,
     route: async () => {},
     close: async () => { closed.context = true },
   }
-  const browser: PlaywrightBrowser = {
+  const browser: CdpBrowser = {
     newContext: async () => context,
     close: async () => { closed.browser = true },
   }
@@ -284,9 +284,9 @@ function fakeCdpConnection(spec: FakePageSpec = {}) {
     pagesClosed: 0,
     browserClosed: false,
     /** Popup listeners the guard registered on the leased pages. */
-    popupListeners: [] as Array<(page: PlaywrightPage) => void>,
+    popupListeners: [] as Array<(page: CdpPage) => void>,
   }
-  const makePage = (): PlaywrightPage => {
+  const makePage = (): CdpPage => {
     state.pagesOpened++
     const pageState = { pageClosed: false, gotos: 0 }
     const page = makeFakePage(spec, pageState, state.popupListeners)
@@ -300,7 +300,7 @@ function fakeCdpConnection(spec: FakePageSpec = {}) {
       },
     }
   }
-  const defaultContext: PlaywrightContext = {
+  const defaultContext: CdpContext = {
     newPage: async () => {
       state.defaultPagesOpened++
       return makePage()
@@ -308,10 +308,10 @@ function fakeCdpConnection(spec: FakePageSpec = {}) {
     route: async () => {},
     close: async () => { state.defaultContextClosed++ },
   }
-  const browser: PlaywrightBrowser = {
+  const browser: CdpBrowser = {
     newContext: async () => {
       state.isolatedContextsOpened++
-      const context: PlaywrightContext = {
+      const context: CdpContext = {
         newPage: async () => makePage(),
         route: async () => {},
         close: async () => { state.isolatedContextsClosed++ },

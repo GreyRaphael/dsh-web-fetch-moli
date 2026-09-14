@@ -10,7 +10,7 @@ Fetched pages are rendered locally; besides the target page itself, no data leav
 
 If you believe you have found a security issue in this plugin, please open a private advisory on GitHub:
 
-https://github.com/chendefine/dsh-web-fetch-playwright/security/advisories/new
+https://github.com/GreyRaphael/dsh-web-fetch-moli/security/advisories/new
 
 Please include:
 
@@ -31,4 +31,4 @@ Repair policy: confirmed issues get a fix, a version bump, a `CHANGELOG.md` entr
 
 ## Supported versions
 
-The latest published npm release is the only supported version. Users on older releases should upgrade to the newest `dsh-web-fetch-playwright` on npm.
+The latest published npm release is the only supported version. Users on older releases should upgrade to the newest `dsh-web-fetch-moli` on npm.

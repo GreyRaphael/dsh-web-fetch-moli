@@ -1,19 +1,23 @@
 # Contributing
 
-Thanks for taking an interest in `dsh-web-fetch-playwright`! This document covers how to work on the plugin, how to verify a change, and how a release goes out.
+Thanks for taking an interest in `dsh-web-fetch-moli`! This document covers how to work on the plugin, how to verify a change, and how a release goes out.
 
 ## Project layout
 
 ```
 src/
-├── index.ts               # host entry: registers provider + settings section
-├── config.ts              # schemastery schema, CDP endpoint normalizer
-├── provider.ts            # WebFetchProvider: navigation, deadline, semaphore, caps
-├── markdown.ts            # denoise pipeline (Readability + DOMPurify + Turndown/GFM)
-├── playwright-resolve.ts  # local backend discovery (path / $PATH / bundled core)
-├── types.ts               # structural Playwright types (runtime module discovered dynamically)
-└── client/                # browser half: settings card, form model, locales
-tests/                     # unit + provider + browser integration (self-skipping)
+├── index.ts           # host entry: registers provider + settings section
+├── config.ts          # schemastery schema, CDP endpoint normalizer
+├── provider.ts        # WebFetchProvider: navigation, deadline, semaphore, caps
+├── markdown.ts        # denoise pipeline (Readability + DOMPurify + Turndown/GFM)
+├── moli-resolve.ts    # local backend discovery and auto-download
+├── moli-process.ts    # local managed Moli daemon lifecycle
+├── cli-runner.ts      # direct one-shot CLI execution
+├── hooks.ts           # CSP bypass and IntersectionObserver sentinels
+├── cdp-pool.ts        # pooled and shared CDP browser sessions
+├── types.ts           # structural CDP/Moli types
+└── client/            # browser half: settings card, form model, locales
+tests/                 # unit + provider + browser integration + benchmarks
 ```
 
 The host half is a [Cordis](https://github.com/shigma/cordis) function plugin registering into the web seam's fetch registry; the browser half is a self-contained client bundle registered with `window.__ModuleLoader__.load`.
@@ -25,11 +29,11 @@ Requirements: Node.js ≥ 22, pnpm ≥ 11.
 ```sh
 pnpm install
 pnpm typecheck   # tsc --noEmit
-pnpm test        # vitest run; the real-browser smoke self-skips when no browser is launchable
+pnpm test        # vitest run; real-browser smokes self-skip when no binary is found
 pnpm build       # tsc declarations + tsdown (host ESM + client module-registration bundle)
 ```
 
-The test suite deliberately needs no Playwright browser on CI: the integration smoke probes a real `chromium.launch()` once and skips when none exists.
+The test suite deliberately needs no Moli binary on CI for pure unit tests; live torture benchmarks are opt-in via `RUN_ONLINE_BENCHMARK=true`.
 
 ## Verifying a change
 
@@ -46,7 +50,7 @@ Small, focused commits that describe the change in the imperative mood (`fix: �
 
 1. Bump `version` in `package.json` and add a `CHANGELOG.md` entry.
 2. Push to `main`; CI (typecheck, test, build, pack verification) must be green.
-3. `pnpm publish` — `prepublishOnly` builds the shipped `lib/`; the npm package is the prebuilt distribution, so `dsh plugin add dsh-web-fetch-playwright` needs no build permission.
+3. `pnpm publish` — `prepublishOnly` builds the shipped `lib/`; the npm package is the prebuilt distribution, so `dsh plugin add dsh-web-fetch-moli` needs no build permission.
 4. Tag and release: `git tag -a v<version> -m "Release …" && git push origin v<version>`, then a GitHub Release pointing at the same commit.
 5. Registry indexes (npm `latest`, marketplace topic scans) update on their own schedules; no manual step.
 

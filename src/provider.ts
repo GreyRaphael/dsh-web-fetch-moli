@@ -24,7 +24,7 @@ import { htmlToMarkdown } from './markdown.ts'
 import { MoliProcessManager } from './moli-process.ts'
 import { resolveCdpBackend, resolveMoliBinary } from './moli-resolve.ts'
 import { runMoliFetch } from './cli-runner.ts'
-import type { PlaywrightBrowser, PlaywrightContext, PlaywrightPage, PlaywrightResponse, PlaywrightRoute } from './types.ts'
+import type { CdpBrowser, CdpContext, CdpPage, CdpResponse, CdpRoute } from './types.ts'
 
 /** Stable id this provider registers under in ctx.web. */
 export const MOLI_FETCH_PROVIDER_ID = 'moli'
@@ -58,9 +58,9 @@ const MAX_SENTINEL_ROUNDS = 10
 
 /** Render session for one CDP fetch. */
 export interface MoliBrowserSession {
-  browser: PlaywrightBrowser
-  context: PlaywrightContext
-  page: PlaywrightPage
+  browser: CdpBrowser
+  context: CdpContext
+  page: CdpPage
   lease?: CdpLease
 }
 
@@ -346,7 +346,7 @@ export class MoliFetchProvider implements WebFetchProvider {
     })
     tracker?.seed(response)
 
-    let challengeEntryResponse: PlaywrightResponse | null = null
+    let challengeEntryResponse: CdpResponse | null = null
     if (challengeWaitMs > 0) {
       let attemptsLeft = effectiveChallengeRetries(config) + 1
       for (;;) {
@@ -410,7 +410,7 @@ export class MoliFetchProvider implements WebFetchProvider {
   }
 
   /** Run bounded rounds of sentinel visibility flips to load infinite cards. */
-  private async runSentinelRounds(page: PlaywrightPage, deadline: Deadline): Promise<void> {
+  private async runSentinelRounds(page: CdpPage, deadline: Deadline): Promise<void> {
     // 1. Initial grace period for scripts to execute and instantiate observers
     await sleep(Math.min(800, deadline.remainingMs()))
 
@@ -474,7 +474,7 @@ export class MoliFetchProvider implements WebFetchProvider {
     }
   }
 
-  private async verdictAfterLoad(page: PlaywrightPage, response: PlaywrightResponse | null): Promise<ChallengeVerdict> {
+  private async verdictAfterLoad(page: CdpPage, response: CdpResponse | null): Promise<ChallengeVerdict> {
     if (response !== null && classifyChallengeResponse(response.status(), response.headers()) === 'challenge') {
       return 'challenge'
     }
@@ -491,7 +491,7 @@ export class MoliFetchProvider implements WebFetchProvider {
     return 'none'
   }
 
-  private async waitForChallengeClear(page: PlaywrightPage, deadline: Deadline, challengeWaitMs: number): Promise<boolean> {
+  private async waitForChallengeClear(page: CdpPage, deadline: Deadline, challengeWaitMs: number): Promise<boolean> {
     const budget = Math.min(challengeWaitMs, deadline.remainingMs() - CHALLENGE_FINISH_RESERVE_MS)
     if (budget <= 0) return false
     const until = Date.now() + budget
@@ -513,7 +513,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => { setTimeout(resolve, ms) })
 }
 
-function isMainFrameDocument(response: PlaywrightResponse, page: PlaywrightPage): boolean {
+function isMainFrameDocument(response: CdpResponse, page: CdpPage): boolean {
   const request = response.request?.()
   if (request === undefined) return true
   if (typeof request.isNavigationRequest === 'function' && !request.isNavigationRequest()) return false
@@ -526,12 +526,12 @@ function isMainFrameDocument(response: PlaywrightResponse, page: PlaywrightPage)
 }
 
 interface MainFrameTracker {
-  last(): PlaywrightResponse | null
-  seed(response: PlaywrightResponse | null): void
+  last(): CdpResponse | null
+  seed(response: CdpResponse | null): void
 }
 
-function trackMainFrameResponses(page: PlaywrightPage): MainFrameTracker {
-  let last: PlaywrightResponse | null = null
+function trackMainFrameResponses(page: CdpPage): MainFrameTracker {
+  let last: CdpResponse | null = null
   try {
     page.on?.('response', (response) => {
       if (isMainFrameDocument(response, page)) last = response
@@ -545,7 +545,7 @@ function trackMainFrameResponses(page: PlaywrightPage): MainFrameTracker {
   }
 }
 
-async function probeStillOnChallenge(page: PlaywrightPage): Promise<boolean> {
+async function probeStillOnChallenge(page: CdpPage): Promise<boolean> {
   if (typeof page.evaluate === 'function') {
     try {
       const verdict = await page.evaluate(CHALLENGE_DOM_PROBE)
@@ -593,13 +593,13 @@ async function closeWithGrace(closeable: { close(): Promise<void> } | undefined)
   })
 }
 
-async function defaultCdpConnect(endpoint: string, timeoutMs: number): Promise<PlaywrightBrowser> {
+async function defaultCdpConnect(endpoint: string, timeoutMs: number): Promise<CdpBrowser> {
   const { chromium } = await resolveCdpBackend()
   return await chromium.connectOverCDP(endpoint, { timeout: timeoutMs })
 }
 
 async function installResourceFilter(owner: {
-  route(glob: string, handler: (route: PlaywrightRoute) => Promise<void>): Promise<void>
+  route(glob: string, handler: (route: CdpRoute) => Promise<void>): Promise<void>
 }): Promise<void> {
   try {
     await owner.route('**/*', async (route) => {
@@ -612,7 +612,7 @@ async function installResourceFilter(owner: {
   }
 }
 
-function guardPopups(page: PlaywrightPage): void {
+function guardPopups(page: CdpPage): void {
   try {
     page.on?.('popup', popup => { void popup.close().catch(() => {}) })
   } catch {

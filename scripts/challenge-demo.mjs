@@ -9,7 +9,7 @@
  * Usage: node scripts/challenge-demo.mjs   (from the repo root, after build)
  */
 import { createServer } from 'node:http'
-import { PlaywrightFetchProvider, WEB_FETCH_CHALLENGE_CODE } from '../lib/index.js'
+import { MoliFetchProvider, WEB_FETCH_CHALLENGE_CODE } from '../lib/index.js'
 
 const GUARDED_ARTICLE = `<!doctype html><html><head><title>Simulated protected article</title></head><body>
 <main><article><h1>Real protected content</h1>
@@ -97,9 +97,9 @@ async function run(provider, label, url) {
 }
 
 function makeProvider(challengeWaitMs, challengeRetries) {
-  return new PlaywrightFetchProvider(() => ({
+  return new MoliFetchProvider(() => ({
     backend: 'local',
-    playwrightPath: '',
+    moliPath: '',
     cdpEndpoint: '',
     shareBrowserContext: true,
     denoise: true,
@@ -109,7 +109,7 @@ function makeProvider(challengeWaitMs, challengeRetries) {
   }))
 }
 
-console.log('=== dsh-web-fetch-playwright issue #2 — bounded natural challenge wait, A/B demo ===')
+console.log('=== dsh-web-fetch-moli challenge wait demo ===')
 console.log(`simulated strict Cloudflare edge at ${base}\n`)
 
 for (const [route, note] of [['', 'managed challenge, clears naturally after 6.5s'], ['spa', 'SPA clear: shell swaps content at 5.5s, no navigation'], ['hard', 'never clears (interactive-only)']]) {

@@ -8,12 +8,12 @@
 import { describe, expect, it } from 'vitest'
 import { CdpConnectionPool } from '../src/cdp-pool.ts'
 import type { CdpConnect } from '../src/cdp-pool.ts'
-import type { PlaywrightBrowser, PlaywrightContext, PlaywrightPage } from '../src/types.ts'
+import type { CdpBrowser, CdpContext, CdpPage } from '../src/types.ts'
 
 /** A fake page tracking its own close (all members the pool may touch). */
 class FakePage {
   private closedFlag = false
-  readonly page: PlaywrightPage = {
+  readonly page: CdpPage = {
     goto: async () => null,
     waitForLoadState: async () => {},
     url: () => 'about:blank',
@@ -29,7 +29,7 @@ class FakeContext {
   private closedFlag = false
   private failNextPage = false
   readonly pages: FakePage[] = []
-  readonly context: PlaywrightContext = {
+  readonly context: CdpContext = {
     newPage: async () => {
       if (this.failNextPage) {
         this.failNextPage = false
@@ -67,7 +67,7 @@ class FakeConnection {
   /** Contexts scripted to be handed out before fresh ones get created. */
   private readonly queuedContexts: FakeContext[] = []
 
-  readonly browser: PlaywrightBrowser = {
+  readonly browser: CdpBrowser = {
     newContext: async () => {
       if (this.nextBroken || !this.live) {
         this.nextBroken = false
@@ -193,7 +193,7 @@ describe('CdpConnectionPool', () => {
     await pool.dispose()
     const pending = pool.acquire(endpoint, 1000).then(  // connect #2, hanging
       lease => lease.browser,
-      () => undefined as unknown as PlaywrightBrowser,
+      () => undefined as unknown as CdpBrowser,
     )
     await new Promise(resolve => { setImmediate(resolve) })
     await pool.dispose() // abandons the in-flight #2
@@ -216,7 +216,7 @@ describe('CdpConnectionPool', () => {
 
     const toB = pool.acquire('http://browser.b:9223', 1000).then(
       lease => lease.browser,
-      () => undefined as unknown as PlaywrightBrowser,
+      () => undefined as unknown as CdpBrowser,
     )
     await new Promise(resolve => { setImmediate(resolve) }) // connect to B hangs
     const lease = await pool.acquire('http://browser.a:9222', 1000) // supersedes B

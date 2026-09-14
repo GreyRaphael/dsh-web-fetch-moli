@@ -29,7 +29,7 @@ import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
-import type { PlaywrightChromium } from './types.ts'
+import type { CdpChromium } from './types.ts'
 
 /** Memoized path to resolved Moli binary. */
 const resolvedMoliCache = new Map<string, string>()
@@ -301,18 +301,18 @@ function findBinaryRecursively(dir: string, binName: string): string | undefined
   return undefined
 }
 
-let bundledCore: PlaywrightChromium | undefined
+let bundledCore: CdpChromium | undefined
 
 /** Resolve the CDP protocol driver using bundled playwright-core. */
-export async function resolveCdpBackend(): Promise<{ chromium: PlaywrightChromium; source: string }> {
+export async function resolveCdpBackend(): Promise<{ chromium: CdpChromium; source: string }> {
   if (bundledCore !== undefined) {
     return { chromium: bundledCore, source: 'bundled playwright-core over CDP' }
   }
   const pkg = await import('playwright-core') as { chromium?: unknown }
   const chromium = pkg.chromium
-  if (chromium === undefined || typeof (chromium as PlaywrightChromium).connectOverCDP !== 'function') {
+  if (chromium === undefined || typeof (chromium as CdpChromium).connectOverCDP !== 'function') {
     throw new Error('playwright-core dependency did not export a usable chromium namespace')
   }
-  bundledCore = chromium as PlaywrightChromium
+  bundledCore = chromium as CdpChromium
   return { chromium: bundledCore, source: 'bundled playwright-core over CDP' }
 }

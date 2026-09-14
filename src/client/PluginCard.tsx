@@ -53,7 +53,7 @@ function ChevronDown({ className }: { className?: string }) {
 }
 
 /**
- * Render the Playwright card's chrome.
+ * Render the Moli card's chrome.
  * @param props - the card's copy, name, form state, and controls.
  * @returns the card, or nothing when the namespace is unavailable.
  */

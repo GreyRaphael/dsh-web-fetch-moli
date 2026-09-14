@@ -13,7 +13,7 @@
  *
  * Exit posture: this only ever *observes*; it never tries to bypass anything.
  */
-import { PlaywrightFetchProvider, WEB_FETCH_CHALLENGE_CODE } from '../lib/index.js'
+import { MoliFetchProvider, WEB_FETCH_CHALLENGE_CODE } from '../lib/index.js'
 
 function parseArgs(argv) {
   const url = argv.find(arg => !arg.startsWith('--'))
@@ -42,20 +42,20 @@ function makeProvider(challengeWaitMs, challengeRetries) {
     challengeRetries,
   }
   if (args.cdp !== '') {
-    return new PlaywrightFetchProvider(() => ({
+    return new MoliFetchProvider(() => ({
       ...config,
       backend: 'cdp',
-      playwrightPath: '',
+      moliPath: '',
       cdpEndpoint: args.cdp,
       // Profile mode by default — the issue's "real browser" setup. Pass an
       // endpoint whose browser you trust to act with its own logins.
       shareBrowserContext: true,
     }))
   }
-  return new PlaywrightFetchProvider(() => ({
+  return new MoliFetchProvider(() => ({
     ...config,
     backend: 'local',
-    playwrightPath: '',
+    moliPath: '',
     cdpEndpoint: '',
     shareBrowserContext: true,
     maxConcurrency: 4,

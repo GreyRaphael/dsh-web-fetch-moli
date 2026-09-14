@@ -1,5 +1,5 @@
 /**
- * The Playwright card's controls: the shipped ValueField (text input with
+ * The Moli card's controls: the shipped ValueField (text input with
  * override badge and reset) plus the two this card adds — a two-option radio
  * group for the backend (each option carrying its backend-specific input
  * nested inside) and a checkbox for the denoise toggle — styled on the same

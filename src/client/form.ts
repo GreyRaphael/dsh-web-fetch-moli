@@ -1,5 +1,5 @@
 /**
- * The staged-form model behind the Playwright card — a faithful subset of the
+ * The staged-form model behind the Moli card — a faithful subset of the
  * shipped `ui-settings-plugins` CardForm (same staging semantics: edits stay
  * local until the card's save, presence in the user layer — not value
  * equality — marks a field overridden), plus the two field kinds this card
@@ -164,7 +164,7 @@ export function numberField(field: string, min: number, max: number): CardFieldS
 }
 
 /**
- * Stages the Playwright card's edits over one settings namespace and writes
+ * Stages the Moli card's edits over one settings namespace and writes
  * them on save. Publishes through a snapshot store because slot components
  * read through a selector while both the scope and the drafts change below.
  */

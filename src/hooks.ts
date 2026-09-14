@@ -6,7 +6,7 @@
  * @module dsh-web-fetch-moli/hooks
  */
 
-import type { PlaywrightPage } from './types.ts'
+import type { CdpPage } from './types.ts'
 
 /**
  * Script injected at document start to track IntersectionObserver sentinels
@@ -54,11 +54,11 @@ export const SENTINEL_OBSERVER_INIT_SCRIPT = `
 /**
  * Configure page-level hooks on a freshly opened page.
  *
- * @param page - Playwright page.
+ * @param page - CDP page.
  * @param options - hook options (bypassCsp, autoScrollSentinel).
  */
 export async function setupPageHooks(
-  page: PlaywrightPage,
+  page: CdpPage,
   options: { bypassCsp?: boolean; autoScrollSentinel?: boolean },
 ): Promise<void> {
   // 1. Bypass CSP if enabled (crucial for micro-frontend dynamic script loading)
@@ -88,10 +88,10 @@ export async function setupPageHooks(
  * Programmatically flip visibility of IntersectionObserver load-more sentinels
  * to trigger dynamic content loading in Moli.
  *
- * @param page - Playwright page.
+ * @param page - CDP page.
  * @returns number of sentinels triggered.
  */
-export async function triggerSentinels(page: PlaywrightPage): Promise<number> {
+export async function triggerSentinels(page: CdpPage): Promise<number> {
   if (typeof page.evaluate !== 'function') return 0
   try {
     const count = await page.evaluate(`
@@ -118,7 +118,7 @@ export async function triggerSentinels(page: PlaywrightPage): Promise<number> {
 /**
  * Check how many connected sentinels are currently tracked on the page.
  */
-export async function getSentinelCount(page: PlaywrightPage): Promise<number> {
+export async function getSentinelCount(page: CdpPage): Promise<number> {
   if (typeof page.evaluate !== 'function') return 0
   try {
     const count = await page.evaluate(`
@@ -141,7 +141,7 @@ export async function getSentinelCount(page: PlaywrightPage): Promise<number> {
 /**
  * Check if the page has instantiated any IntersectionObserver.
  */
-export async function getIoCount(page: PlaywrightPage): Promise<number> {
+export async function getIoCount(page: CdpPage): Promise<number> {
   if (typeof page.evaluate !== 'function') return 0
   try {
     const count = await page.evaluate('window.__moliIoCount || 0')

@@ -1,7 +1,7 @@
 /**
  * The denoise pipeline: rendered HTML → sanitized article HTML → markdown.
  *
- * The classic stack, in order: jsdom parses the page Playwright rendered;
+ * The classic stack, in order: jsdom parses the page rendered by the CDP browser;
  * inline `data:` image payloads are elided to size placeholders (build
  * tools inline images as base64, which would otherwise dominate the body);
  * Mozilla Readability extracts the article (dropping nav bars, sidebars,

@@ -6,10 +6,10 @@
  * @module dsh-web-fetch-moli/cdp-pool
  */
 
-import type { PlaywrightBrowser, PlaywrightContext, PlaywrightPage } from './types.ts'
+import type { CdpBrowser, CdpContext, CdpPage } from './types.ts'
 
 /** Opens the shared connection; injected so tests can substitute a fake. */
-export type CdpConnect = (endpoint: string, timeoutMs: number) => Promise<PlaywrightBrowser>
+export type CdpConnect = (endpoint: string, timeoutMs: number) => Promise<CdpBrowser>
 
 /** How a lease scopes its fetch: throwaway context or the browser profile. */
 export type CdpAcquireMode = 'isolated' | 'profile'
@@ -17,24 +17,24 @@ export type CdpAcquireMode = 'isolated' | 'profile'
 /** One fetch's lease: the shared browser, a context, and the tab it owns. */
 export interface CdpLease {
   /** The shared connection — close only what the lease owns, never this. */
-  browser: PlaywrightBrowser
+  browser: CdpBrowser
   /**
    * The context the page lives in: fetch-owned (`isolated`) or the remote
    * browser's default context (`profile`). NEVER close the latter — closing
    * it tears down the whole shared connection.
    */
-  context: PlaywrightContext
+  context: CdpContext
   /** The fetch-owned tab; release always closes it. */
-  page: PlaywrightPage
+  page: CdpPage
   /** True when context is the remote default context: release must not close it. */
   persistent: boolean
 }
 
 /** A reusable `connectOverCDP` session handing out per-fetch pages. */
 export class CdpConnectionPool {
-  private browser: PlaywrightBrowser | undefined
+  private browser: CdpBrowser | undefined
   private endpoint = ''
-  private connecting: Promise<PlaywrightBrowser> | undefined
+  private connecting: Promise<CdpBrowser> | undefined
   private connectingEndpoint = ''
   /** Bumped by dispose/replace so a settling connect knows it was abandoned. */
   private generation = 0
@@ -70,7 +70,7 @@ export class CdpConnectionPool {
   /**
    * Open one lease's page on a live connection.
    */
-  private async openLease(browser: PlaywrightBrowser, mode: CdpAcquireMode): Promise<CdpLease> {
+  private async openLease(browser: CdpBrowser, mode: CdpAcquireMode): Promise<CdpLease> {
     if (mode === 'profile') {
       const context = browser.contexts?.()[0]
       if (context === undefined) {
@@ -111,14 +111,14 @@ export class CdpConnectionPool {
   }
 
   /** The shared connection for `endpoint`, connecting or reconnecting as needed. */
-  private async ensure(endpoint: string, timeoutMs: number): Promise<PlaywrightBrowser> {
+  private async ensure(endpoint: string, timeoutMs: number): Promise<CdpBrowser> {
     if (this.browser !== undefined && this.endpoint === endpoint && this.isLive(this.browser)) return this.browser
     if (this.connecting !== undefined && this.connectingEndpoint === endpoint) return this.connecting
     return await this.connectFresh(endpoint, timeoutMs)
   }
 
   /** Start a connection to `endpoint`, superseding whatever was there. */
-  private connectFresh(endpoint: string, timeoutMs: number): Promise<PlaywrightBrowser> {
+  private connectFresh(endpoint: string, timeoutMs: number): Promise<CdpBrowser> {
     const stale = this.browser
     this.browser = undefined
     this.endpoint = ''
@@ -145,7 +145,7 @@ export class CdpConnectionPool {
   }
 
   /** Clear the reference when this connection reports it went away. */
-  private watch(browser: PlaywrightBrowser): void {
+  private watch(browser: CdpBrowser): void {
     try {
       browser.on?.('disconnected', () => {
         if (this.browser === browser) {
@@ -159,14 +159,14 @@ export class CdpConnectionPool {
   }
 
   /** Forget a connection known to be dead. */
-  private drop(browser: PlaywrightBrowser): void {
+  private drop(browser: CdpBrowser): void {
     if (this.browser === browser) {
       this.browser = undefined
       this.endpoint = ''
     }
   }
 
-  private isLive(browser: PlaywrightBrowser): boolean {
+  private isLive(browser: CdpBrowser): boolean {
     return browser.isConnected?.() !== false
   }
 }
