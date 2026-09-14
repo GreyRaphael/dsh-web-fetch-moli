@@ -20,10 +20,9 @@ describe('Bailian micro-frontend real-world benchmark', () => {
       return
     }
 
-    // Live benchmark against Alibaba Cloud Bailian requires domestic direct network.
-    // GitHub Actions CI datacenter IPs (Azure/AWS) are redirected or geoblocked by Alibaba Cloud WAF.
-    if (process.env.CI && !process.env.RUN_ONLINE_BENCHMARK) {
-      console.warn('skipping live Bailian benchmark in CI environment (datacenter IPs are blocked or redirected by Alibaba Cloud WAF; run with RUN_ONLINE_BENCHMARK=true to force)')
+    // Live torture benchmark against Alibaba Cloud Bailian is opt-in via RUN_ONLINE_BENCHMARK=true
+    if (!process.env.RUN_ONLINE_BENCHMARK) {
+      console.warn('skipping live Bailian benchmark (opt-in via RUN_ONLINE_BENCHMARK=true)')
       return
     }
 

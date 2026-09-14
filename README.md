@@ -42,11 +42,11 @@ web_fetch (tool-web)
 ## Requirements
 
 - DeepSeek Harness (`dsh web`), Node.js ≥ 20.
-- [Moli](https://github.com/lexmount/moli) v1.1.5+ executable installed on `$PATH`, in `~/.local/bin/moli`, or configured via `moliPath`.
+- **Zero manual setup**: the plugin features **automatic download on first use**. If no `moli` binary is detected on your system, it automatically downloads and unpacks the latest release binary matching your OS and architecture (Linux, macOS, Windows x86_64 / arm64) into `~/.cache/moli`.
+- Existing installations of [Moli](https://github.com/lexmount/moli) v1.1.5+ are automatically detected on `$PATH`, `~/.local/bin/moli`, or via the `moliPath` setting.
 
-To install Moli:
+Manual installation (optional):
 ```sh
-# Download release from GitHub:
 curl -sSL https://github.com/lexmount/moli/releases/latest/download/moli-x86_64-unknown-linux-gnu.tar.gz | tar -xz -C ~/.local/bin
 chmod +x ~/.local/bin/moli
 ```

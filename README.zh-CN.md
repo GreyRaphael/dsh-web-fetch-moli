@@ -44,9 +44,10 @@ web_fetch (tool-web)
 ## 环境依赖
 
 - DeepSeek Harness (`dsh web`)，Node.js ≥ 20。
-- 系统安装有 [Moli](https://github.com/lexmount/moli) v1.1.5+ 可执行文件（可在 `$PATH`、`~/.local/bin/moli` 中找到，或在设置中指定 `moliPath`）。
+- **免手动安装**：插件内置**首次使用自动下载安装**能力。若检测到系统中未安装 Moli，会自动从官方 Release 下载适配当前操作系统与 CPU 架构（Linux、macOS、Windows x86_64 / arm64）的最新版二进制并就绪，开箱即用。
+- 亦支持使用已有的 [Moli](https://github.com/lexmount/moli) v1.1.5+（置于系统 `$PATH`、`~/.local/bin/moli`，或在配置项中指定 `moliPath`）。
 
-快速安装 Moli：
+手动安装参考（可选）：
 ```sh
 curl -sSL https://github.com/lexmount/moli/releases/latest/download/moli-x86_64-unknown-linux-gnu.tar.gz | tar -xz -C ~/.local/bin
 chmod +x ~/.local/bin/moli

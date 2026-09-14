@@ -12,13 +12,30 @@
  * @module dsh-web-fetch-moli/moli-resolve
  */
 
-import { accessSync, constants, statSync } from 'node:fs'
+import {
+  accessSync,
+  chmodSync,
+  constants,
+  copyFileSync,
+  createWriteStream,
+  mkdirSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+} from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
+import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 import type { PlaywrightChromium } from './types.ts'
 
 /** Memoized path to resolved Moli binary. */
 const resolvedMoliCache = new Map<string, string>()
+
+/** In-flight download promises keyed by destination directory. */
+const inFlightDownloads = new Map<string, Promise<string>>()
 
 /**
  * Find `name` as an executable file on `$PATH`.
@@ -128,11 +145,160 @@ export async function resolveMoliBinary(configuredPath = ''): Promise<string> {
     }
   }
 
+  // 5. Automated fallback: download latest official Moli release if missing
+  try {
+    const downloaded = await downloadLatestMoliBinary()
+    if (isExecutableFile(downloaded)) {
+      resolvedMoliCache.set(trimmed, downloaded)
+      return downloaded
+    }
+  } catch (downloadErr: unknown) {
+    throw new Error(
+      `cannot find "moli" executable on $PATH or standard locations (~/.local/bin, ~/.cargo/bin), ` +
+      `and automated download failed: ${String(downloadErr instanceof Error ? downloadErr.message : downloadErr)}. ` +
+      `Please install Moli manually (download release from https://github.com/lexmount/moli or cargo install moli) or set the "moliPath" setting.`,
+    )
+  }
+
   throw new Error(
     'cannot find "moli" executable on $PATH or standard locations (~/.local/bin, ~/.cargo/bin); ' +
     'please install Moli (e.g. download release from https://github.com/lexmount/moli or cargo install moli) ' +
     'or set the "moliPath" setting.',
   )
+}
+
+/**
+ * Detect the official release asset filename for current platform and CPU architecture.
+ */
+export function getMoliReleaseAsset(): { filename: string; isZip: boolean } {
+  const platform = process.platform
+  const arch = process.arch
+
+  if (platform === 'linux') {
+    if (arch === 'x64') return { filename: 'moli-x86_64-unknown-linux-gnu.tar.gz', isZip: false }
+    if (arch === 'arm64') return { filename: 'moli-aarch64-unknown-linux-gnu.tar.gz', isZip: false }
+  } else if (platform === 'darwin') {
+    if (arch === 'arm64') return { filename: 'moli-aarch64-apple-darwin.tar.gz', isZip: false }
+    if (arch === 'x64') return { filename: 'moli-x86_64-apple-darwin.tar.gz', isZip: false }
+  } else if (platform === 'win32') {
+    if (arch === 'x64') return { filename: 'moli-x86_64-pc-windows-msvc.zip', isZip: true }
+    if (arch === 'arm64') return { filename: 'moli-aarch64-pc-windows-msvc.zip', isZip: true }
+  }
+  throw new Error(`unsupported platform/architecture for Moli auto-download: ${platform}-${arch}`)
+}
+
+/**
+ * Automatically download and unpack the latest official Moli release binary
+ * into `~/.cache/moli/moli` (or `~/.cache/moli/moli.exe`).
+ *
+ * @param destinationDir - directory to save the binary into (defaults to `~/.cache/moli`).
+ * @returns absolute path to the extracted executable binary.
+ */
+export async function downloadLatestMoliBinary(destinationDir?: string): Promise<string> {
+  const userHome = homedir()
+  const destDir = destinationDir ?? join(userHome, '.cache', 'moli')
+  mkdirSync(destDir, { recursive: true })
+
+  const isWindows = process.platform === 'win32'
+  const binName = isWindows ? 'moli.exe' : 'moli'
+  const targetBinaryPath = join(destDir, binName)
+
+  if (isExecutableFile(targetBinaryPath)) {
+    return targetBinaryPath
+  }
+
+  const existingDownload = inFlightDownloads.get(destDir)
+  if (existingDownload !== undefined) {
+    return existingDownload
+  }
+
+  const downloadPromise = (async () => {
+    // Re-check after acquiring task slot
+    if (isExecutableFile(targetBinaryPath)) {
+      return targetBinaryPath
+    }
+
+    const { filename, isZip } = getMoliReleaseAsset()
+    const downloadUrl = `https://github.com/lexmount/moli/releases/latest/download/${filename}`
+    console.info(`[dsh-web-fetch-moli] "moli" binary not found; auto-downloading from ${downloadUrl}...`)
+
+    const tempArchive = join(destDir, `.download-${String(Date.now())}-${filename}`)
+    const tempExtractDir = join(destDir, `.extract-${String(Date.now())}`)
+    mkdirSync(tempExtractDir, { recursive: true })
+
+    try {
+      const response = await fetch(downloadUrl, { redirect: 'follow' })
+      if (!response.ok) {
+        throw new Error(`HTTP ${String(response.status)}: ${response.statusText}`)
+      }
+      if (!response.body) {
+        throw new Error('response body is null')
+      }
+
+      await pipeline(Readable.fromWeb(response.body as any), createWriteStream(tempArchive))
+
+      if (isZip) {
+        try {
+          execFileSync('tar', ['-xf', tempArchive, '-C', tempExtractDir], { stdio: 'pipe' })
+        } catch {
+          execFileSync(
+            'powershell',
+            ['-NoProfile', '-Command', `Expand-Archive -Path "${tempArchive}" -DestinationPath "${tempExtractDir}" -Force`],
+            { stdio: 'pipe' },
+          )
+        }
+      } else {
+        execFileSync('tar', ['-xzf', tempArchive, '-C', tempExtractDir], { stdio: 'pipe' })
+      }
+
+      const foundBinary = findBinaryRecursively(tempExtractDir, binName)
+      if (foundBinary === undefined) {
+        throw new Error(`could not locate "${binName}" inside downloaded archive`)
+      }
+
+      // Atomically install via temp sibling
+      const tempTarget = `${targetBinaryPath}.part-${String(Date.now())}`
+      copyFileSync(foundBinary, tempTarget)
+      if (!isWindows) {
+        chmodSync(tempTarget, 0o755)
+      }
+      try {
+        renameSync(tempTarget, targetBinaryPath)
+      } catch {
+        copyFileSync(tempTarget, targetBinaryPath)
+        try { rmSync(tempTarget, { force: true }) } catch {}
+      }
+
+      if (!isWindows) {
+        chmodSync(targetBinaryPath, 0o755)
+      }
+
+      console.info(`[dsh-web-fetch-moli] successfully installed Moli binary to ${targetBinaryPath}`)
+      return targetBinaryPath
+    } finally {
+      try { rmSync(tempArchive, { force: true }) } catch {}
+      try { rmSync(tempExtractDir, { recursive: true, force: true }) } catch {}
+    }
+  })().finally(() => {
+    inFlightDownloads.delete(destDir)
+  })
+
+  inFlightDownloads.set(destDir, downloadPromise)
+  return downloadPromise
+}
+
+function findBinaryRecursively(dir: string, binName: string): string | undefined {
+  const entries = readdirSync(dir, { withFileTypes: true })
+  for (const entry of entries) {
+    const full = join(dir, entry.name)
+    if (entry.isDirectory()) {
+      const found = findBinaryRecursively(full, binName)
+      if (found !== undefined) return found
+    } else if (entry.isFile() && (entry.name === binName || entry.name.toLowerCase() === binName.toLowerCase())) {
+      return full
+    }
+  }
+  return undefined
 }
 
 let bundledCore: PlaywrightChromium | undefined
