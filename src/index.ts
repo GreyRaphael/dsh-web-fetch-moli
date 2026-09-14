@@ -11,6 +11,7 @@ import type {} from '@deepseek-ai/dsh-web'
 import { Config } from './config.ts'
 import type { ResolvedConfig } from './config.ts'
 import { MoliFetchProvider } from './provider.ts'
+import { resolveMoliBinary } from './moli-resolve.ts'
 
 export {
   Config,
@@ -71,4 +72,9 @@ export function apply(ctx: Context, config: Config): void {
   const provider = new MoliFetchProvider(() => current())
   ctx.effect(() => () => { void provider.dispose() }, 'dsh-web-fetch-moli: cleanup daemon and CDP')
   ctx.web.registerFetchProvider(provider)
+
+  // Proactively warm up / download binary in background on plugin startup
+  if (config.backend !== 'cdp') {
+    void resolveMoliBinary(config.moliPath).catch(() => {})
+  }
 }
