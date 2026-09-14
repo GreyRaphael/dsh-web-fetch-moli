@@ -14,7 +14,7 @@
     "verbatimModuleSyntax": true,
     "allowImportingTsExtensions": true,
     "noEmit": true,
-    "types": ["node", "react", "react-dom", "jsdom", "turndown"],
+    "types": ["node", "react", "react-dom"],
     "baseUrl": ".",
     "paths": {
       "cordis": ["./node_modules/@deepseek-ai/cordis"]

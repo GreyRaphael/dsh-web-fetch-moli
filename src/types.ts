@@ -122,7 +122,7 @@ export interface CdpBrowser {
 
 /** The `chromium` namespace of whichever protocol driver serves a fetch. */
 export interface CdpChromium {
-  launch(options?: { headless?: boolean; executablePath?: string; timeout?: number }): Promise<CdpBrowser>
+  launch?(options?: { headless?: boolean; executablePath?: string; timeout?: number }): Promise<CdpBrowser>
   connectOverCDP(endpointURL: string, options?: { timeout?: number }): Promise<CdpBrowser>
 }
 

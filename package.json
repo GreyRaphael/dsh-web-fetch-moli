@@ -1,6 +1,6 @@
 {
   "name": "dsh-web-fetch-moli",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "description": "Moli (ultra-lightweight Rust headless browser) web-fetch provider for DeepSeek Harness: renders complex SPAs, micro-frontends, and static pages with ~60MB memory.",
   "type": "module",
   "license": "MIT",
@@ -89,13 +89,7 @@
     "retention": "none"
   },
   "dependencies": {
-    "@deepseek-ai/schemastery": ">=3.18.2 <4",
-    "@joplin/turndown-plugin-gfm": "^1.0.68",
-    "@mozilla/readability": "^0.6.0",
-    "dompurify": "^3.4.15",
-    "jsdom": "^29.1.1",
-    "playwright-core": "^1.50.0",
-    "turndown": "^7.2.0"
+    "@deepseek-ai/schemastery": ">=3.18.2 <4"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.0.1-rc.1 <5",
@@ -124,11 +118,9 @@
     "@deepseek-ai/dsh-client-ui-slots": "0.1.2-alpha.5",
     "@deepseek-ai/dsh-settings": "0.1.2-alpha.5",
     "@deepseek-ai/dsh-web": "0.1.2-alpha.5",
-    "@types/jsdom": "^30.0.0",
     "@types/node": "^24.0.0",
     "@types/react": "^18.3.1",
     "@types/react-dom": "^18.3.1",
-    "@types/turndown": "^5.0.6",
     "lightningcss": "^1.32.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

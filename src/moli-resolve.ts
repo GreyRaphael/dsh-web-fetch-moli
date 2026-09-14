@@ -7,7 +7,7 @@
  *  3. `moli` found on `$PATH`;
  *  4. Standard user and system directories (`~/.local/bin/moli`, `~/.cargo/bin/moli`, etc.).
  *
- * For CDP connectivity, the bundled `playwright-core` is used as the protocol driver.
+ * For CDP connectivity, the native WebSocket CDP client is used as the protocol driver.
  *
  * @module dsh-web-fetch-moli/moli-resolve
  */
@@ -301,18 +301,18 @@ function findBinaryRecursively(dir: string, binName: string): string | undefined
   return undefined
 }
 
-let bundledCore: CdpChromium | undefined
+let nativeClient: CdpChromium | undefined
 
-/** Resolve the CDP protocol driver using bundled playwright-core. */
+/** Resolve the CDP protocol driver using the native WebSocket client. */
 export async function resolveCdpBackend(): Promise<{ chromium: CdpChromium; source: string }> {
-  if (bundledCore !== undefined) {
-    return { chromium: bundledCore, source: 'bundled playwright-core over CDP' }
+  if (nativeClient !== undefined) {
+    return { chromium: nativeClient, source: 'native WebSocket CDP client' }
   }
-  const pkg = await import('playwright-core') as { chromium?: unknown }
-  const chromium = pkg.chromium
-  if (chromium === undefined || typeof (chromium as CdpChromium).connectOverCDP !== 'function') {
-    throw new Error('playwright-core dependency did not export a usable chromium namespace')
+  const { connectCdp } = await import('./cdp-client.ts')
+  const client: CdpChromium = {
+    connectOverCDP: (endpoint: string, options?: { timeout?: number }) =>
+      connectCdp(endpoint, options?.timeout ?? 30000),
   }
-  bundledCore = chromium as CdpChromium
-  return { chromium: bundledCore, source: 'bundled playwright-core over CDP' }
+  nativeClient = client
+  return { chromium: client, source: 'native WebSocket CDP client' }
 }

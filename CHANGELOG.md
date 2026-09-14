@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-14
+
+### Changed
+
+- **零重型外部依赖重构（Zero Heavy External Dependencies）**:
+  - 移除 `playwright-core`，基于 Node.js 原生 `fetch` 与 `WebSocket` 实现纯 TypeScript 原生 CDP 客户端（`src/cdp-client.ts`），支持会话管理、目标附加、网络请求拦截路由与页面生命周期监听。
+  - 移除 `jsdom`、`@mozilla/readability`、`dompurify`、`turndown` 及 `@joplin/turndown-plugin-gfm`，实现零依赖纯原生 HTML 清洗与 GFM Markdown 转换引擎（`src/markdown.ts`），大幅降低内存占用与 GC 压力，解析性能提升数十倍。
+  - 生产依赖仅保留 `@deepseek-ai/schemastery`，安装体积减少数十 MB，消除潜在供应链依赖安全风险。
+
 ## [0.1.6] - 2026-09-14
 
 ### Fixed

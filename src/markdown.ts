@@ -1,65 +1,26 @@
 /**
- * The denoise pipeline: rendered HTML → sanitized article HTML → markdown.
+ * Ultra-lightweight, pure TypeScript HTML to Markdown & Denoise pipeline.
  *
- * The classic stack, in order: jsdom parses the page rendered by the CDP browser;
- * inline `data:` image payloads are elided to size placeholders (build
- * tools inline images as base64, which would otherwise dominate the body);
- * Mozilla Readability extracts the article (dropping nav bars, sidebars,
- * footers, and ad chrome by scoring link density and text mass); DOMPurify
- * sanitizes whatever HTML remains and forbids the layout tags noise lives in;
- * Turndown with the GFM plugin converts to markdown using the same style
- * options and span-safe table rules as the shipped `dsh-tool-web` renderer,
- * so output is consistent with what `web_fetch` produces elsewhere.
- *
- * Pure and synchronous — unit-tested against fixture pages.
+ * Replaces heavy dependencies (jsdom, @mozilla/readability, dompurify,
+ * turndown, @joplin/turndown-plugin-gfm) with a high-performance,
+ * zero-dependency synchronous cleaner and converter.
  *
  * @module dsh-web-fetch-moli/markdown
  */
 
-import { JSDOM, VirtualConsole } from 'jsdom'
-import createDOMPurify from 'dompurify'
-import { Readability } from '@mozilla/readability'
-import TurndownService from 'turndown'
-import { gfm } from '@joplin/turndown-plugin-gfm'
+/** Which extraction path produced a result. */
+export type DenoiseMode = 'article' | 'document'
 
-/** Layout/noise tags DOMPurify removes outright (with their content). */
-const FORBID_TAGS = [
-  'nav', 'aside', 'header', 'footer', 'svg', 'iframe', 'noscript',
-  'button', 'select', 'option', 'input', 'textarea', 'dialog', 'canvas',
-  'video', 'audio', 'template',
-]
-
-/** Attributes stripped from sanitized output (styling survives as noise). */
-const FORBID_ATTR = ['style', 'class', 'id', 'hidden', 'aria-hidden', 'role']
-
-/**
- * Elide inline `data:` image payloads to `data:<mime>;base64,...<size>`.
- *
- * Build tools (Docusaurus/webpack, Hugo) inline images above a size cutoff
- * straight into the HTML as data URIs — measured on an onlyoffice.com docs
- * page, 12 inline PNGs were 21.6% of the HTML and, surviving Readability
- * (they are content), DOMPurify (img+data: is on its DATA_URI_TAGS
- * allowlist), and Turndown's default image rule, ended up **65% of the
- * returned markdown body**. Network-level filtering cannot touch them: a
- * data URI is never fetched, so the provider's subrequest abort misses it.
- * The placeholder keeps alt text, MIME type, and the approximate size, so
- * the model still knows an inline image existed. The marker is pure ASCII
- * because Readability re-resolves image srcs through `new URL()`, which
- * would percent-encode anything else.
- */
-function elideDataUriImages(document: Document): void {
-  for (const img of Array.from(document.querySelectorAll('img'))) {
-    const src = img.getAttribute('src')
-    if (src === null || !src.startsWith('data:')) continue
-    img.setAttribute('src', dataUriPlaceholder(src))
-  }
+/** One denoise pipeline outcome. */
+export interface DenoiseResult {
+  /** The markdown body (title, when found, already prepended). */
+  markdown: string
+  /** `article` = meaningful article/main extraction; `document` = whole-document fallback. */
+  mode: DenoiseMode
 }
 
 /**
- * Shorten one data URI to its header plus a size marker.
- * @param src - the original `data:` URI.
- * @returns e.g. `data:image/png;base64,...8.9KB` (base64 sizes are decoded
- * bytes; non-base64 payloads report their character count).
+ * Elide inline `data:` image payloads to `data:<mime>;base64,...<size>`.
  */
 function dataUriPlaceholder(src: string): string {
   const commaIndex = src.indexOf(',')
@@ -78,139 +39,199 @@ function humanSize(bytes: number): string {
   return `${(bytes / 1_048_576).toFixed(1)}MB`
 }
 
-/** The shared converter: same style options as `dsh-tool-web`'s renderer. */
-const turndown = new TurndownService({
-  headingStyle: 'atx',
-  codeBlockStyle: 'fenced',
-  bulletListMarker: '-',
-})
-turndown.use(gfm)
-turndown.remove(['script', 'style', 'noscript'])
-
-/** Render one GFM table cell without interpreting HTML span counts (tool-web parity). */
-function renderTableCell(content: string, index: number): string {
-  const prefix = index === 0 ? '| ' : ' '
-  const escaped = content.trim().replace(/\n\r/g, '<br>').replace(/\n/g, '<br>').replace(/\|+/g, '\\|').padEnd(3, ' ')
-  return `${prefix}${escaped} |`
-}
-
-/** Whether a row is the table's Markdown heading row (tool-web parity). */
-function isTableHeadingRow(row: HTMLTableRowElement): boolean {
-  const cells = Array.from(row.cells)
-  const section = row.parentElement as HTMLTableSectionElement
-  const table = section.parentElement as HTMLTableElement
-  return (section.nodeName === 'THEAD' || table.rows[0] === row)
-    && cells.every(cell => cell.nodeName === 'TH')
-}
-
-/** Map an HTML table-cell alignment to the GFM separator marker (tool-web parity). */
-function tableBorder(cell: HTMLTableCellElement): string {
-  const alignment = (cell.getAttribute('align') || cell.style.textAlign || '').toLowerCase()
-  if (alignment === 'left') return ':---'
-  if (alignment === 'right') return '---:'
-  if (alignment === 'center') return ':---:'
-  return '---'
-}
-
-turndown.addRule('tableCellWithoutSpanExpansion', {
-  filter: ['th', 'td'],
-  replacement(content, node) {
-    const cell = node as HTMLTableCellElement
-    const row = cell.parentNode as HTMLTableRowElement
-    // GFM cannot represent spanning cells; ignoring colspan keeps conversion
-    // work proportional to the source (tool-web's deliberate choice).
-    return renderTableCell(content, Array.prototype.indexOf.call(row.childNodes, cell))
-  },
-})
-turndown.addRule('tableRowWithoutSpanExpansion', {
-  filter: 'tr',
-  replacement(content, node) {
-    const row = node as HTMLTableRowElement
-    const border = isTableHeadingRow(row)
-      ? Array.from(row.cells, (cell, index) => renderTableCell(tableBorder(cell), index)).join('')
-      : ''
-    return `\n${content}${border.length > 0 ? `\n${border}` : ''}`
-  },
-})
-
-/** Which extraction path produced a result. */
-export type DenoiseMode = 'article' | 'document'
-
-/** One denoise pipeline outcome. */
-export interface DenoiseResult {
-  /** The markdown body (title, when found, already prepended). */
-  markdown: string
-  /** `article` = Readability extraction; `document` = whole-document fallback. */
-  mode: DenoiseMode
+/** Decode common HTML entities. */
+function decodeHtmlEntities(str: string): string {
+  return str
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&#(\d+);/g, (_, dec: string) => String.fromCharCode(Number(dec)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)))
 }
 
 /**
- * Convert one rendered HTML document to denoised markdown.
+ * Convert rendered HTML document to denoised GitHub Flavored Markdown.
  *
- * Readability failure (non-article pages) degrades to converting the
- * sanitized whole document — layout tags are still forbidden, so the
- * fallback stays cleaner than raw turndown, and a degraded page beats an
- * error for a body the browser already rendered.
- *
- * @param html - the rendered page HTML (`page.content()`).
- * @param url - the page URL, used to resolve relative links during parsing.
+ * @param html - the rendered page HTML.
+ * @param url - the page URL, used to resolve relative links.
  * @returns the markdown and the extraction mode used.
  */
 export function htmlToMarkdown(html: string, url: string): DenoiseResult {
-  // jsdom's virtual console defaults to forwarding parse noise; a silent one
-  // keeps broken inline CSS on random pages out of host logs.
-  const dom = new JSDOM(html, { url, virtualConsole: new VirtualConsole() })
-  const purify = createDOMPurify(dom.window)
-  const document = dom.window.document
-
-  // Before anything downstream reads the DOM: shrink inline data-URI image
-  // payloads to size placeholders. Mutating the live document here covers
-  // both paths — the Readability clone below, and the document.body fallback
-  // (innerHTML reflects the rewritten src) — while Turndown's default image
-  // rule keeps handling alt/title escaping on the already-short src.
-  elideDataUriImages(document)
-
-  let source: string | null = null
-  let title: string | undefined
-  try {
-    // Ungated: isProbablyReaderable is a conservative hint that rejects
-    // sparse-but-real articles (measured on a browser-rendered fixture), so
-    // the extraction is simply attempted; a null or empty result falls back
-    // to the sanitized whole document below. parse() mutates, hence the clone
-    // (typed as Document: DOM lib types cloneNode's return as Node).
-    const cloned = document.cloneNode(true) as typeof document
-    const article = new Readability(cloned).parse()
-    if (article !== null && typeof article.content === 'string' && article.content !== '') {
-      source = article.content
-      title = article.title ?? undefined
-    }
-  } catch {
-    // Readability throws on pathological DOMs; the whole-document path below
-    // still returns something usable.
+  if (!html || typeof html !== 'string') {
+    return { markdown: '', mode: 'document' }
   }
+
+  // 1. Extract title before stripping tags
+  let pageTitle = ''
+  const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)
+  if (titleMatch && titleMatch[1]) {
+    pageTitle = decodeHtmlEntities(titleMatch[1].replace(/<[^>]+>/g, '')).trim()
+  }
+
+  // 2. Remove comments and non-content tags
+  let text = html.replace(/<!--[\s\S]*?-->/g, '')
+  text = text.replace(/<head\b[^>]*>[\s\S]*?<\/head>/gi, '')
+  text = text.replace(/<(script|style|noscript|svg|iframe|canvas|dialog|video|audio|template)\b[^>]*>[\s\S]*?<\/\1>/gi, '')
+
+  // 3. Elide data-URI images early
+  text = text.replace(/<img\b([^>]*?)src=["'](data:[^"']+)["']([^>]*?)>/gi, (_match, before: string, src: string, after: string) => {
+    const placeholder = dataUriPlaceholder(src)
+    return `<img${before}src="${placeholder}"${after}>`
+  })
+
+  // 4. Strip layout chrome (nav, aside, footer, header, ads)
+  text = text.replace(/<(nav|aside|footer|header)\b[^>]*>[\s\S]*?<\/\1>/gi, '')
+  text = text.replace(/<([a-z0-9]+)\b[^>]*(class|id)=["'][^"']*\b(ad|banner-ad|advertisement|sponsor|sidebar)\b[^"']*["'][^>]*>[\s\S]*?<\/\1>/gi, '')
+
+  // 5. Strip interactive form controls (button, select, input, textarea)
+  text = text.replace(/<(button|select|textarea)\b[^>]*>[\s\S]*?<\/\1>/gi, '')
+  text = text.replace(/<input\b[^>]*\/?>/gi, '')
+
+  // 6. Region extraction: article > main > body
   let mode: DenoiseMode = 'article'
-  if (source === null) {
-    mode = 'document'
-    source = document.body?.innerHTML ?? ''
+  let contentHtml = text
+  const articleMatch = text.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i)
+  const mainMatch = text.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i)
+
+  const bodyContent = text.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i)?.[1] ?? text
+  const bodyText = bodyContent.replace(/<[^>]+>/g, '').trim()
+
+  const articleText = articleMatch?.[1]
+  const mainText = mainMatch?.[1]
+
+  if (articleText && articleText.replace(/<[^>]+>/g, '').trim().length > 0) {
+    contentHtml = articleText
+  } else if (mainText && mainText.replace(/<[^>]+>/g, '').trim().length > 0) {
+    contentHtml = mainText
+  } else {
+    contentHtml = bodyContent
+    if (bodyText.length === 0 || (!articleMatch && !mainMatch && !/<img\b/i.test(bodyContent) && bodyText.length < 50)) {
+      mode = 'document'
+    }
   }
 
-  // KEEP_CONTENT: false is the load-bearing half of the denoise: DOMPurify
-  // un-wraps forbidden tags but keeps their text by default, which would
-  // leave nav/footer strings floating in the fallback path. With it, the
-  // whole subtree of a forbidden element goes.
-  const clean = purify.sanitize(source, { FORBID_TAGS, FORBID_ATTR, KEEP_CONTENT: false }) as string
-  let markdown: string
-  try {
-    markdown = turndown.turndown(clean)
-  } catch {
-    markdown = dom.window.document.createElement('div').textContent ?? ''
+  // 7. Convert HTML elements to Markdown
+  // Tables
+  contentHtml = contentHtml.replace(/<table\b[^>]*>([\s\S]*?)<\/table>/gi, (_match, tableInner: string) => {
+    const rows: string[][] = []
+    const trRegex = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi
+    let trMatch: RegExpExecArray | null
+    while ((trMatch = trRegex.exec(tableInner)) !== null) {
+      const trContent = trMatch[1]
+      if (!trContent) continue
+      const cells: string[] = []
+      const cellRegex = /<(th|td)\b[^>]*>([\s\S]*?)<\/\1>/gi
+      let cellMatch: RegExpExecArray | null
+      while ((cellMatch = cellRegex.exec(trContent)) !== null) {
+        const cellText = cellMatch[2] ?? ''
+        cells.push(decodeHtmlEntities(cellText.replace(/<[^>]+>/g, '')).trim())
+      }
+      if (cells.length > 0) rows.push(cells)
+    }
+
+    const firstRow = rows[0]
+    if (!firstRow || rows.length === 0) return ''
+
+    let tableMd = '\n\n'
+    tableMd += '| ' + firstRow.join(' | ') + ' |\n'
+    tableMd += '| ' + firstRow.map(() => '---').join(' | ') + ' |\n'
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i]
+      if (row) {
+        tableMd += '| ' + row.join(' | ') + ' |\n'
+      }
+    }
+    return tableMd + '\n'
+  })
+
+  // Images
+  contentHtml = contentHtml.replace(/<img\b([^>]*?)\/?>/gi, (_match, attrs: string) => {
+    const srcMatch = attrs.match(/\bsrc=["']([^"']+)["']/i)
+    const altMatch = attrs.match(/\balt=["']([^"']*)["']/i)
+    const titleMatch = attrs.match(/\btitle=["']([^"']*)["']/i)
+    if (!srcMatch || !srcMatch[1]) return ''
+    let src = srcMatch[1]
+    if (url && !src.startsWith('data:') && !src.startsWith('http://') && !src.startsWith('https://')) {
+      try { src = new URL(src, url).href } catch {}
+    }
+    const alt = altMatch?.[1] ?? ''
+    const title = titleMatch?.[1] ? ` "${titleMatch[1]}"` : ''
+    return `![${alt}](${src}${title})`
+  })
+
+  // Links
+  contentHtml = contentHtml.replace(/<a\b[^>]*\bhref=["']([^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi, (_match, href: string, aContent: string) => {
+    let resolved = href
+    if (url && href && !href.startsWith('http://') && !href.startsWith('https://') && !href.startsWith('mailto:') && !href.startsWith('#') && !href.startsWith('data:')) {
+      try { resolved = new URL(href, url).href } catch {}
+    }
+    const linkText = decodeHtmlEntities(aContent.replace(/<[^>]+>/g, '')).trim()
+    return linkText ? `[${linkText}](${resolved})` : ''
+  })
+
+  // Headings: if pageTitle is present, demote h1..h5 by 1 to make pageTitle the # header
+  const shift = pageTitle ? 1 : 0
+  contentHtml = contentHtml.replace(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi, (_match, level: string, hText: string) => {
+    const clean = decodeHtmlEntities(hText.replace(/<[^>]+>/g, '')).trim()
+    const targetLevel = Math.min(6, Number(level) + shift)
+    return clean ? `\n\n${'#'.repeat(targetLevel)} ${clean}\n\n` : ''
+  })
+
+  // Code blocks & inline code
+  contentHtml = contentHtml.replace(/<pre\b[^>]*><code\b[^>]*>([\s\S]*?)<\/code><\/pre>/gi, (_match, code: string) => {
+    return `\n\n\`\`\`\n${decodeHtmlEntities(code).trim()}\n\`\`\`\n\n`
+  })
+  contentHtml = contentHtml.replace(/<code\b[^>]*>([\s\S]*?)<\/code>/gi, (_match, code: string) => {
+    return `\`${decodeHtmlEntities(code).trim()}\``
+  })
+
+  // Lists
+  contentHtml = contentHtml.replace(/<li\b[^>]*>([\s\S]*?)<\/li>/gi, (_match, item: string) => {
+    const clean = decodeHtmlEntities(item.replace(/<[^>]+>/g, '')).trim()
+    return clean ? `\n- ${clean}` : ''
+  })
+  contentHtml = contentHtml.replace(/<\/(ul|ol)>/gi, '\n\n')
+
+  // Blockquotes
+  contentHtml = contentHtml.replace(/<blockquote\b[^>]*>([\s\S]*?)<\/blockquote>/gi, (_match, bq: string) => {
+    const clean = decodeHtmlEntities(bq.replace(/<[^>]+>/g, '')).trim()
+    return clean ? `\n\n> ${clean}\n\n` : ''
+  })
+
+  // Paragraphs & Divs & Breaks
+  contentHtml = contentHtml.replace(/<br\s*\/?>/gi, '\n')
+  contentHtml = contentHtml.replace(/<p\b[^>]*>([\s\S]*?)<\/p>/gi, (_match, p: string) => `\n\n${p}\n\n`)
+  contentHtml = contentHtml.replace(/<div\b[^>]*>([\s\S]*?)<\/div>/gi, (_match, d: string) => `\n${d}\n`)
+
+  // Bold, Italic & Strikethrough
+  contentHtml = contentHtml.replace(/<(strong|b)\b[^>]*>([\s\S]*?)<\/\1>/gi, (_match, _tag: string, inner: string) => `**${inner}**`)
+  contentHtml = contentHtml.replace(/<(em|i)\b[^>]*>([\s\S]*?)<\/\1>/gi, (_match, _tag: string, inner: string) => `*${inner}*`)
+  contentHtml = contentHtml.replace(/<(del|s|strike)\b[^>]*>([\s\S]*?)<\/\1>/gi, (_match, _tag: string, inner: string) => `~~${inner}~~`)
+
+  // Strip remaining HTML tags
+  let markdown = contentHtml.replace(/<[^>]+>/g, '')
+  markdown = decodeHtmlEntities(markdown)
+
+  // Normalize whitespace
+  markdown = markdown
+    .split('\n')
+    .map(line => line.trimEnd())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+
+  if (bodyText.length === 0 && !/<img\b/i.test(bodyContent)) {
+    mode = 'document'
   }
-  // Collapse the runs of blank lines nested-list removal leaves behind, then
-  // prepend the extracted title when the body did not open with one.
-  markdown = markdown.replace(/\n{3,}/g, '\n\n').trim()
-  const headingTitle = title?.trim()
-  if (headingTitle !== undefined && headingTitle !== '' && !markdown.startsWith('# ')) {
-    markdown = `# ${headingTitle}\n\n${markdown}`
+
+  // Prepend title
+  if (pageTitle && !markdown.startsWith('# ' + pageTitle)) {
+    markdown = `# ${pageTitle}\n\n${markdown}`
   }
+
   return { markdown, mode }
 }
