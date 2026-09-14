@@ -13,7 +13,7 @@
  *
  * Pure and synchronous — unit-tested against fixture pages.
  *
- * @module dsh-web-fetch-playwright/markdown
+ * @module dsh-web-fetch-moli/markdown
  */
 
 import { JSDOM, VirtualConsole } from 'jsdom'

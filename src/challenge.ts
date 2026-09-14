@@ -25,7 +25,7 @@
  * Solving, spoofing, CAPTCHA answering, and cookie lifting live outside the
  * plugin entirely.
  *
- * @module dsh-web-fetch-playwright/challenge
+ * @module dsh-web-fetch-moli/challenge
  */
 
 /** How often the bounded wait probes the live page for challenge markers. */

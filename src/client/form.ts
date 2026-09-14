@@ -10,7 +10,7 @@
  * `@deepseek-ai/*` packages; the snapshot store is a local structural clone
  * of the runtime contract.
  *
- * @module dsh-web-fetch-playwright/client/form
+ * @module dsh-web-fetch-moli/client/form
  */
 
 import type { SettingsScope, SettingsScopeSnapshot } from '@deepseek-ai/dsh-client-runtime/client'

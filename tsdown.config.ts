@@ -16,11 +16,11 @@ import { transform } from 'lightningcss'
 
 const CLIENT_EXTERNALS = ['react', 'react/jsx-runtime', 'react-dom', 'react-dom/client', 'cordis']
 const NODE_BUILTINS = new Set([...builtinModules, ...builtinModules.map(id => `node:${id}`)])
-const CSS_PREFIX = '\0dsh-web-fetch-playwright-css:'
+const CSS_PREFIX = '\0dsh-web-fetch-moli-css:'
 const CSS_SUFFIX = '.mjs'
 type BuildPlugin = NonNullable<UserConfig['plugins']>
 
-const PLUGIN_ID = 'dsh-web-fetch-playwright'
+const PLUGIN_ID = 'dsh-web-fetch-moli'
 
 function injectTag(fileId: string, cssText: string): string {
   const tagId = `${PLUGIN_ID}/${basename(fileId)}`
@@ -39,7 +39,7 @@ function injectTag(fileId: string, cssText: string): string {
 
 function purityGate(): BuildPlugin {
   return {
-    name: 'dsh-web-fetch-playwright-client-purity',
+    name: 'dsh-web-fetch-moli-client-purity',
     resolveId(source: string) {
       if (NODE_BUILTINS.has(source)) throw new Error(`client bundle cannot import Node builtin ${source}`)
       if (source.startsWith('@deepseek-ai/')) throw new Error(`client bundle cannot value-import ${source}`)
@@ -50,7 +50,7 @@ function purityGate(): BuildPlugin {
 
 function cssPlugin(): BuildPlugin {
   return {
-    name: 'dsh-web-fetch-playwright-css-inline',
+    name: 'dsh-web-fetch-moli-css-inline',
     resolveId(source: string, importer: string | undefined) {
       if (!source.endsWith('.css')) return null
       const absolute = source.startsWith('.') && importer !== undefined ? resolvePath(dirname(importer), source) : resolvePath(source)

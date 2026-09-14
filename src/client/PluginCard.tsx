@@ -3,7 +3,7 @@
  * PluginCard (disclosure header, unsaved marker, save/discard footer), with
  * the chevron inlined so the bundle stays self-contained.
  *
- * @module dsh-web-fetch-playwright/client/PluginCard
+ * @module dsh-web-fetch-moli/client/PluginCard
  */
 
 import { useState, type ReactNode } from 'react'

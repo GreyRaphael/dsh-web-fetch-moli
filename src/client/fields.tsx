@@ -5,7 +5,7 @@
  * nested inside) and a checkbox for the denoise toggle — styled on the same
  * tokens and rhythm as the built-in plugin-configuration fields.
  *
- * @module dsh-web-fetch-playwright/client/fields
+ * @module dsh-web-fetch-moli/client/fields
  */
 
 import type { ReactNode } from 'react'
