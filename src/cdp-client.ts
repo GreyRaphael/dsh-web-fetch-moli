@@ -200,6 +200,18 @@ export class NativeCdpBrowser implements CdpBrowser {
     }
   }
 
+  private readonly disconnectListeners = new Set<() => void>()
+
+  isConnected(): boolean {
+    return !this.isClosed
+  }
+
+  on(event: 'disconnected', listener: () => void): void {
+    if (event === 'disconnected') {
+      this.disconnectListeners.add(listener)
+    }
+  }
+
   private handleDisconnect(): void {
     this.isClosed = true
     for (const [, { reject, timer }] of this.pending) {
@@ -207,6 +219,9 @@ export class NativeCdpBrowser implements CdpBrowser {
       reject(new Error('Target closed'))
     }
     this.pending.clear()
+    for (const listener of this.disconnectListeners) {
+      try { listener() } catch {}
+    }
   }
 
   async newContext(): Promise<CdpContext> {
@@ -309,6 +324,21 @@ export class NativeCdpPage implements CdpPage {
     public readonly sessionId: string,
   ) {}
 
+  private triggerDomContentLoaded(): void {
+    if (this.domContentLoaded) return
+    this.domContentLoaded = true
+    const waiters = this.domContentWaiters.splice(0)
+    for (const w of waiters) w()
+  }
+
+  private triggerLoadFired(): void {
+    this.triggerDomContentLoaded()
+    if (this.loadFired) return
+    this.loadFired = true
+    const waiters = this.loadWaiters.splice(0)
+    for (const w of waiters) w()
+  }
+
   async init(): Promise<void> {
     await Promise.all([
       this.send('Page.enable'),
@@ -370,14 +400,18 @@ export class NativeCdpPage implements CdpPage {
     }
     this.responseListeners.add(responseHandler)
 
+    let pollTimer: NodeJS.Timeout | null = null
+
     try {
       const waitPromise = new Promise<void>((resolve, reject) => {
         const timer = setTimeout(() => {
+          if (pollTimer) clearInterval(pollTimer)
           reject(new Error(`Navigation timeout of ${timeout}ms exceeded: ${url}`))
         }, timeout)
 
         const onDone = () => {
           clearTimeout(timer)
+          if (pollTimer) clearInterval(pollTimer)
           resolve()
         }
 
@@ -395,10 +429,44 @@ export class NativeCdpPage implements CdpPage {
         throw new Error(`cannot navigate to ${url}: ${navRes.errorText}`)
       }
 
+      // Active readyState polling fallback in case browser engine (e.g. Moli)
+      // delays or misses emitting Page.domContentEventFired / Page.loadEventFired.
+      let inFlight = false
+      pollTimer = setInterval(async () => {
+        if (inFlight || this.isClosed) return
+        inFlight = true
+        try {
+          const evalPromise = this.evaluate(`
+            (() => ({ state: document.readyState, href: location.href }))()
+          `)
+          const info = await Promise.race([
+            evalPromise,
+            new Promise<null>((r) => setTimeout(() => r(null), 800)),
+          ]).catch(() => null) as { state?: string; href?: string } | null
+
+          if (info && typeof info.state === 'string') {
+            const hasNavigated = Boolean(info.href && !info.href.startsWith('about:blank'))
+            if (hasNavigated) {
+              if (info.state === 'interactive' || info.state === 'complete') {
+                this.triggerDomContentLoaded()
+              }
+              if (info.state === 'complete') {
+                this.triggerLoadFired()
+              }
+            }
+          }
+        } catch {
+          // Best effort
+        } finally {
+          inFlight = false
+        }
+      }, 250)
+
       await waitPromise
       this.currentUrl = url
       return targetResponse
     } finally {
+      if (pollTimer) clearInterval(pollTimer)
       this.responseListeners.delete(responseHandler)
     }
   }
@@ -409,8 +477,11 @@ export class NativeCdpPage implements CdpPage {
     if (state === 'load' && this.loadFired) return
 
     const timeout = options?.timeout ?? 30000
+    let pollTimer: NodeJS.Timeout | null = null
+
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
+        if (pollTimer) clearInterval(pollTimer)
         if (state === 'domcontentloaded') {
           const idx = this.domContentWaiters.indexOf(onDone)
           if (idx !== -1) this.domContentWaiters.splice(idx, 1)
@@ -426,13 +497,47 @@ export class NativeCdpPage implements CdpPage {
 
       const onDone = () => {
         clearTimeout(timer)
+        if (pollTimer) clearInterval(pollTimer)
         resolve()
       }
 
+      let inFlight = false
       if (state === 'domcontentloaded') {
         this.domContentWaiters.push(onDone)
+        pollTimer = setInterval(async () => {
+          if (inFlight || this.isClosed) return
+          inFlight = true
+          try {
+            const evalPromise = this.evaluate('document.readyState')
+            const rs = await Promise.race([
+              evalPromise,
+              new Promise<null>((r) => setTimeout(() => r(null), 800)),
+            ]).catch(() => null)
+            if (rs === 'interactive' || rs === 'complete') {
+              this.triggerDomContentLoaded()
+            }
+          } catch {} finally {
+            inFlight = false
+          }
+        }, 250)
       } else if (state === 'load') {
         this.loadWaiters.push(onDone)
+        pollTimer = setInterval(async () => {
+          if (inFlight || this.isClosed) return
+          inFlight = true
+          try {
+            const evalPromise = this.evaluate('document.readyState')
+            const rs = await Promise.race([
+              evalPromise,
+              new Promise<null>((r) => setTimeout(() => r(null), 800)),
+            ]).catch(() => null)
+            if (rs === 'complete') {
+              this.triggerLoadFired()
+            }
+          } catch {} finally {
+            inFlight = false
+          }
+        }, 250)
       } else if (state === 'networkidle') {
         this.networkIdleWaiters.push(onDone)
         this.checkNetworkIdle()
@@ -531,13 +636,9 @@ export class NativeCdpPage implements CdpPage {
 
   handleEvent(method: string, params: Record<string, unknown>): void {
     if (method === 'Page.domContentEventFired') {
-      this.domContentLoaded = true
-      const waiters = this.domContentWaiters.splice(0)
-      for (const w of waiters) w()
+      this.triggerDomContentLoaded()
     } else if (method === 'Page.loadEventFired') {
-      this.loadFired = true
-      const waiters = this.loadWaiters.splice(0)
-      for (const w of waiters) w()
+      this.triggerLoadFired()
     } else if (method === 'Page.frameNavigated') {
       const frame = params.frame as { id?: string; url?: string } | undefined
       if (frame?.id === this.mainFrameId && frame.url) {

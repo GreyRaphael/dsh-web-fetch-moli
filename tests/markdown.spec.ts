@@ -228,4 +228,23 @@ describe('htmlToMarkdown', () => {
     expect(markdown).toContain('Main analytics content here.')
     expect(markdown).not.toContain('Sidebar noise')
   })
+
+  it('preserves entire card catalog when a tiny promo paragraph exists', () => {
+    const cards = Array.from({ length: 15 }, (_, i) => `
+      <div class="card-item model-card">
+        <h3>Model-${i}</h3>
+        <div>Parameters: 100B, Context: 128K</div>
+        <div>Description of model-${i} with capabilities and performance details.</div>
+      </div>
+    `).join('\n')
+    const page = `<!doctype html><html><head><title>Market</title></head><body>
+      <div class="banner"><p>Tiny disclaimer footnote</p></div>
+      <div class="grid-container">${cards}</div>
+    </body></html>`
+    const { markdown } = htmlToMarkdown(page, 'https://example.com/market')
+    expect(markdown).toContain('Model-0')
+    expect(markdown).toContain('Model-14')
+    expect(markdown).toContain('Parameters: 100B')
+    expect(markdown).toContain('Description of model-0')
+  })
 })

@@ -113,11 +113,11 @@ describe('effectiveMaxConcurrency', () => {
 })
 
 describe('effectiveContextMode', () => {
-  it('shares the profile by default; an explicit opt-out isolates', () => {
+  it('shares the profile by default for cdp; isolates for local', () => {
     expect(effectiveContextMode({ backend: 'cdp' })).toBe('profile')
     expect(effectiveContextMode({ backend: 'cdp', shareBrowserContext: true })).toBe('profile')
     expect(effectiveContextMode({ backend: 'cdp', shareBrowserContext: false })).toBe('isolated')
-    expect(effectiveContextMode({ backend: 'local' })).toBe('profile')
+    expect(effectiveContextMode({ backend: 'local' })).toBe('isolated')
     expect(effectiveContextMode({ backend: 'local', shareBrowserContext: false })).toBe('isolated')
   })
 })

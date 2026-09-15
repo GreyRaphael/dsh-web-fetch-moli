@@ -377,6 +377,11 @@ export class MoliFetchProvider implements WebFetchProvider {
       }
     }
 
+    // Wait for client-rendered SPA / micro-frontend to settle out of skeleton/spinner
+    if (response === null || response.status() === 200) {
+      await this.settleDynamicSpa(page, deadline)
+    }
+
     // Dynamic SPA sentinel loading rounds (for infinite scroll / micro-frontend card lists)
     if (config.autoScrollSentinel !== false) {
       await this.runSentinelRounds(page, deadline)
@@ -409,6 +414,56 @@ export class MoliFetchProvider implements WebFetchProvider {
     return bounded !== html ? { ...result, truncated: true } : result
   }
 
+  /**
+   * Settle client-rendered SPAs and micro-frontends before extracting content.
+   * - Static, server-rendered, or unit-test fake pages return immediately.
+   * - Skeleton shells / loading spinners wait until content cards/text have mounted into the DOM.
+   */
+  private async settleDynamicSpa(page: CdpPage, deadline: Deadline): Promise<void> {
+    if (typeof page.evaluate !== 'function') return
+    const maxWaitMs = 7_000
+    const start = Date.now()
+
+    while (Date.now() - start < maxWaitMs && deadline.remainingMs() > 4_000) {
+      let isUnsettled = false
+      try {
+        isUnsettled = Boolean(await page.evaluate(`
+          (() => {
+            const body = document.body;
+            if (!body) return true;
+
+            const hasSpinner = Boolean(document.querySelector('.ant-spin, .anticon-spin, [class*="spin"], [class*="skeleton"], [class*="loading"]'));
+            if (hasSpinner) return true;
+
+            // Check content elements (cards, models, articles, table rows)
+            const cardCount = document.querySelectorAll("[class*='card'], [class*='item'], [class*='model'], article, main, tr, table").length;
+
+            // Compute visible text length (excluding script/style)
+            const clone = body.cloneNode(true);
+            const toRemove = clone.querySelectorAll('script, style, noscript');
+            toRemove.forEach(el => el.remove());
+            const visibleText = (clone.textContent || '').trim();
+
+            // Settled if we have enough content cards OR substantial visible text (>600 chars)
+            if (cardCount >= 5 || visibleText.length > 600) {
+              return false;
+            }
+
+            // Minimal text and few cards without spinner: still waiting for SPA hydration
+            return true;
+          })()
+        `))
+      } catch {
+        isUnsettled = false
+      }
+
+      if (!isUnsettled) {
+        break
+      }
+      await sleep(Math.min(300, deadline.remainingMs()))
+    }
+  }
+
   /** Run bounded rounds of sentinel visibility flips to load infinite cards. */
   private async runSentinelRounds(page: CdpPage, deadline: Deadline): Promise<void> {
     if (typeof page.evaluate !== 'function') return
@@ -426,8 +481,20 @@ export class MoliFetchProvider implements WebFetchProvider {
     }
 
     // 2. Wait for sentinel elements to mount into the DOM (e.g. async micro-frontend components)
+    // For articles / documentation pages that use IntersectionObserver for TOC or lazy images,
+    // avoid idling for 8 seconds if there are no infinite-scroll sentinel elements.
+    const isDocPage = await page.evaluate(`
+      (() => {
+        const hasSentinel = Boolean(document.querySelector('[class*="sentinel" i], [class*="loadmore" i], [class*="load-more" i], [class*="infinite" i], [id*="sentinel" i], [id*="loadmore" i], [id*="infinite" i]'));
+        if (hasSentinel) return false;
+        const textLen = (document.body?.innerText || document.body?.textContent || '').trim().length;
+        const hasDocArticle = Boolean(document.querySelector('article, .markdown-body, .docs-content, table'));
+        return textLen > 2000 && hasDocArticle;
+      })()
+    `).catch(() => false)
+
     const waitStart = Date.now()
-    const maxSentinelWaitMs = 9_000
+    const maxSentinelWaitMs = isDocPage ? 600 : 8_000
     let sentinelCount = await getSentinelCount(page)
 
     while (sentinelCount === 0 && Date.now() - waitStart < maxSentinelWaitMs) {

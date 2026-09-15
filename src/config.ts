@@ -138,9 +138,12 @@ export function effectiveChallengeRetries(config: Pick<Config, 'challengeRetries
  * The context mode a fetch runs with.
  */
 export function effectiveContextMode(config: Pick<Config, 'backend' | 'shareBrowserContext'>): CdpContextMode {
-  if ((config.backend === 'cdp' || config.backend === 'local') && config.shareBrowserContext !== false) {
+  // Remote CDP connects to an existing browser profile where retaining logins is desirable.
+  if (config.backend === 'cdp' && config.shareBrowserContext !== false) {
     return 'profile'
   }
+  // Local managed daemon runs cleanly in isolated contexts to prevent cross-site
+  // Service Worker collisions and cookie contamination between different domains/subdomains.
   return 'isolated'
 }
 
