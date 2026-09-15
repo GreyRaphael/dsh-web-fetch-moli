@@ -95,9 +95,10 @@ export async function deepScrollContainers(page: CdpPage): Promise<DeepScrollRes
           window.dispatchEvent(new Event('scroll', { bubbles: true }));
         } catch {}
 
-        const lastItem = document.querySelector(
-          '[class*="card"]:last-child, [class*="item"]:last-child, [class*="model"]:last-child'
+        const cards = document.querySelectorAll(
+          '[class*="card"], [class*="item"], [class*="model"]:not([class*="app"])'
         );
+        const lastItem = cards.length > 0 ? cards[cards.length - 1] : null;
         if (lastItem && typeof lastItem.scrollIntoView === 'function') {
           lastItem.scrollIntoView(false);
         }

@@ -9,6 +9,9 @@
 
 import { type ChildProcess, spawn } from 'node:child_process'
 import { createServer } from 'node:net'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 
 /** Get an ephemeral free port from the OS network stack. */
 export async function getFreePort(): Promise<number> {
@@ -73,10 +76,17 @@ export class MoliProcessManager {
         const endpoint = `http://127.0.0.1:${port}`
         this.stderrBuffer = []
 
-        const child = spawn(moliPath, ['serve', '--host', '127.0.0.1', '--port', String(port), '--layout', '--resource'], {
-          stdio: ['ignore', 'pipe', 'pipe'],
-          detached: false,
-        })
+        const cacheDir = path.join(os.homedir(), '.cache', 'moli', 'http-cache')
+        try { fs.mkdirSync(cacheDir, { recursive: true }) } catch {}
+
+        const child = spawn(
+          moliPath,
+          ['serve', '--host', '127.0.0.1', '--port', String(port), '--layout', '--resource', '--http-cache-dir', cacheDir],
+          {
+            stdio: ['ignore', 'pipe', 'pipe'],
+            detached: false,
+          },
+        )
         this.child = child
 
         child.stderr?.on('data', (chunk: Buffer) => {

@@ -54,7 +54,7 @@ const SETTLE_MS = 500
 const CLOSE_GRACE_MS = 1_500
 
 /** Maximum rounds of deep container scrolling for infinite-scroll/lazy-load pages. */
-const MAX_SCROLL_ROUNDS = 8
+const MAX_SCROLL_ROUNDS = 15
 
 /** Render session for one CDP fetch. */
 export interface MoliBrowserSession {
@@ -421,8 +421,15 @@ export class MoliFetchProvider implements WebFetchProvider {
    */
   private async settleDynamicSpa(page: CdpPage, deadline: Deadline): Promise<void> {
     if (typeof page.evaluate !== 'function') return
-    const maxWaitMs = 10_000
+    const maxWaitMs = Math.min(18_000, deadline.remainingMs() - 8_000)
     const start = Date.now()
+
+    // Initial nudge to wake up viewport observers
+    await page.evaluate(`(() => {
+      window.dispatchEvent(new Event('resize'));
+      window.dispatchEvent(new Event('scroll'));
+      window.scrollTo(0, 10);
+    })()`).catch(() => {})
 
     while (Date.now() - start < maxWaitMs && deadline.remainingMs() > 4_000) {
       let isUnsettled = false
@@ -441,36 +448,39 @@ export class MoliFetchProvider implements WebFetchProvider {
               }
             }
 
-            // 2. Explicit loading spinners
+            // 2. Explicit loading spinners / text
             const hasSpinner = Boolean(document.querySelector('.ant-spin:not(.ant-spin-nested-loading), .anticon-spin, [class*="skeleton-active"], [class*="skeleton-element"]'));
-            if (hasSpinner) return true;
+            const text = (body.textContent || '').trim();
+            const hasLoadingText = text.includes('加载中');
+            if (hasSpinner || hasLoadingText) return true;
 
             // 3. Structured documentation or substantial article content
             const hasDoc = Boolean(document.querySelector('article, .markdown-body, .docs-content, table'));
-            if (hasDoc) {
-              const docText = (body.textContent || '').trim().length;
-              if (docText > 800) return false;
-            }
+            if (hasDoc && text.length > 800) return false;
 
             // 4. SPA root / micro-frontend subapps
             const appRoot = document.querySelector('#root, #app, [id*="subapp"], [id*="micro"]');
             if (appRoot) {
-              const rootCards = appRoot.querySelectorAll("[class*='card'], [class*='item'], [class*='model'], tr").length;
-              const rootText = (appRoot.textContent || '').trim().length;
-              if (rootCards >= 5 || rootText >= 500) {
-                return false;
+              const rootCards = appRoot.querySelectorAll("[class*='card'], [class*='item'], [class*='model']:not([class*='app']), tr").length;
+              if (rootCards >= 5) return false;
+
+              const mainContent = appRoot.querySelector('main, [role="main"], [class*="-app"]:not(#root):not(#app), .content');
+              if (mainContent) {
+                const mainText = (mainContent.textContent || '').trim();
+                if (mainText.length > 500 && !mainText.includes('加载中')) return false;
               }
+
               // App root present but still hydrating: wait
               return true;
             }
 
             // 5. General content cards or table rows (for non-#root pages)
-            const cardCount = document.querySelectorAll("[class*='card'], [class*='model'], tr").length;
+            const cardCount = document.querySelectorAll("[class*='card'], [class*='model']:not([class*='app']), tr").length;
             if (cardCount >= 5) return false;
 
-            // 6. Visible text length (excluding script/style)
+            // 6. Visible non-chrome text length (excluding script/style/nav/header/aside)
             const clone = body.cloneNode(true);
-            const toRemove = clone.querySelectorAll('script, style, noscript');
+            const toRemove = clone.querySelectorAll('script, style, noscript, nav, header, aside');
             toRemove.forEach(el => el.remove());
             const visibleText = (clone.textContent || '').trim();
             if (visibleText.length > 600) return false;
@@ -485,6 +495,15 @@ export class MoliFetchProvider implements WebFetchProvider {
       if (!isUnsettled) {
         break
       }
+
+      // Periodically scroll to trigger lazy mounting in microfrontends
+      if ((Date.now() - start) % 1200 < 250) {
+        await page.evaluate(`(() => {
+          window.scrollBy(0, 50);
+          window.dispatchEvent(new Event('scroll'));
+        })()`).catch(() => {})
+      }
+
       await sleep(Math.min(150, deadline.remainingMs()))
     }
   }
@@ -501,18 +520,19 @@ export class MoliFetchProvider implements WebFetchProvider {
       (() => {
         const hasDoc = Boolean(document.querySelector('article, .markdown-body, .docs-content, table'));
         const textLen = (document.body ? (document.body.textContent || '') : '').trim().length;
-        const hasCards = document.querySelectorAll("[class*='card'], [class*='model']").length;
+        const hasCards = document.querySelectorAll("[class*='card'], [class*='model']:not([class*='app'])").length;
         return hasDoc && textLen > 800 && hasCards < 5;
       })()
     `).catch(() => false))
 
     const maxRounds = isDocPage ? 2 : MAX_SCROLL_ROUNDS
     const requiredStableRounds = isDocPage ? 1 : 2
-    const maxBudgetMs = isDocPage ? 1_500 : 5_000
+    const maxBudgetMs = isDocPage ? 1_500 : Math.min(12_000, deadline.remainingMs() - 3_000)
     const startTime = Date.now()
 
     let lastNodes = 0
     let lastTextLen = 0
+    let lastCards = 0
     let stableRounds = 0
 
     for (let round = 1; round <= maxRounds; round++) {
@@ -525,25 +545,46 @@ export class MoliFetchProvider implements WebFetchProvider {
         break
       }
 
-      // Cold start: if no scrollables found yet, allow up to 3 retries for layout to compute
-      if (status.scrollablesCount === 0) {
-        if (round >= (isDocPage ? 2 : 3)) break
-        await sleep(Math.min(isDocPage ? 100 : 200, deadline.remainingMs()))
-        continue
+      // Wait a realistic settle time for API pagination requests to round-trip and render
+      const waitBudget = Math.min(isDocPage ? 100 : 750, deadline.remainingMs())
+      if (waitBudget > 0) await sleep(waitBudget)
+
+      const current = await page.evaluate(`
+        (() => {
+          const body = document.body;
+          if (!body) return { nodes: 0, textLen: 0, cards: 0, isLoading: false };
+          const cards = document.querySelectorAll("[class*='card'], [class*='item'], [class*='model']:not([class*='app'])").length;
+          const text = (body.textContent || '').trim();
+          const isLoading = text.includes('加载中') || Boolean(document.querySelector('.ant-spin, [class*="loading"]'));
+          return {
+            nodes: body.getElementsByTagName('*').length,
+            textLen: text.length,
+            cards,
+            isLoading
+          };
+        })()
+      `).catch(() => ({ nodes: status.nodes, textLen: status.textLen, cards: 0, isLoading: false })) as {
+        nodes: number
+        textLen: number
+        cards: number
+        isLoading: boolean
       }
 
-      // Plateau detection: exit when DOM nodes and text length stabilize
-      const isGrowthSmall = Math.abs(status.nodes - lastNodes) <= 30 && Math.abs(status.textLen - lastTextLen) <= 80
-      if (isGrowthSmall && lastNodes > 0) {
+      const nodeDiff = Math.abs(current.nodes - lastNodes)
+      const textDiff = Math.abs(current.textLen - lastTextLen)
+      const cardDiff = Math.abs(current.cards - lastCards)
+
+      // Don't mark as plateau if network request / loading spinner is active
+      if (round > 1 && !current.isLoading && nodeDiff < 15 && textDiff < 150 && cardDiff === 0) {
         stableRounds++
         if (stableRounds >= requiredStableRounds) break
       } else {
         stableRounds = 0
       }
 
-      lastNodes = status.nodes
-      lastTextLen = status.textLen
-      await sleep(Math.min(isDocPage ? 100 : 200, deadline.remainingMs()))
+      lastNodes = current.nodes
+      lastTextLen = current.textLen
+      lastCards = current.cards
     }
   }
 

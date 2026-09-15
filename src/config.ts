@@ -165,7 +165,11 @@ export function effectiveContextMode(config: Pick<Config, 'backend' | 'shareBrow
   if (config.backend === 'cdp' && config.shareBrowserContext !== false) {
     return 'profile'
   }
-  // Local managed daemon runs cleanly in isolated contexts to prevent cross-site
+  // User explicitly opted in to profile sharing on local daemon.
+  if (config.shareBrowserContext === true) {
+    return 'profile'
+  }
+  // Local managed daemon runs cleanly in isolated contexts by default to prevent cross-site
   // Service Worker collisions and cookie contamination between different domains/subdomains.
   return 'isolated'
 }
