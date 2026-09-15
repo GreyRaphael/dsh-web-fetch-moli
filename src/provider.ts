@@ -45,7 +45,7 @@ const MAX_PIPELINE_INPUT_CHARS = 2_000_000
 const QUEUE_TIMEOUT_MS = 20_000
 
 /** Default per-fetch budget (ms) - strictly below harness 30s tool timeout. */
-const DEFAULT_TIMEOUT_MS = 26_000
+const DEFAULT_TIMEOUT_MS = 28_000
 
 /** Post-DOM settle wait (ms) so dynamic micro-frontend modules settle. */
 const SETTLE_MS = 500
@@ -54,7 +54,7 @@ const SETTLE_MS = 500
 const CLOSE_GRACE_MS = 1_500
 
 /** Maximum rounds of deep container scrolling for infinite-scroll/lazy-load pages. */
-const MAX_SCROLL_ROUNDS = 20
+const MAX_SCROLL_ROUNDS = 8
 
 /** Render session for one CDP fetch. */
 export interface MoliBrowserSession {
@@ -485,7 +485,7 @@ export class MoliFetchProvider implements WebFetchProvider {
       if (!isUnsettled) {
         break
       }
-      await sleep(Math.min(250, deadline.remainingMs()))
+      await sleep(Math.min(150, deadline.remainingMs()))
     }
   }
 
@@ -507,14 +507,16 @@ export class MoliFetchProvider implements WebFetchProvider {
     `).catch(() => false))
 
     const maxRounds = isDocPage ? 2 : MAX_SCROLL_ROUNDS
-    const requiredStableRounds = isDocPage ? 1 : 3
+    const requiredStableRounds = isDocPage ? 1 : 2
+    const maxBudgetMs = isDocPage ? 1_500 : 5_000
+    const startTime = Date.now()
 
     let lastNodes = 0
     let lastTextLen = 0
     let stableRounds = 0
 
     for (let round = 1; round <= maxRounds; round++) {
-      if (deadline.remainingMs() < 2_500) break
+      if (deadline.remainingMs() < 3_000 || Date.now() - startTime >= maxBudgetMs) break
 
       const status = await deepScrollContainers(page)
 
@@ -523,15 +525,15 @@ export class MoliFetchProvider implements WebFetchProvider {
         break
       }
 
-      // Cold start: if no scrollables found yet, allow up to 4 retries for layout to compute
+      // Cold start: if no scrollables found yet, allow up to 3 retries for layout to compute
       if (status.scrollablesCount === 0) {
-        if (round >= (isDocPage ? 2 : 4)) break
-        await sleep(Math.min(350, deadline.remainingMs()))
+        if (round >= (isDocPage ? 2 : 3)) break
+        await sleep(Math.min(isDocPage ? 100 : 200, deadline.remainingMs()))
         continue
       }
 
       // Plateau detection: exit when DOM nodes and text length stabilize
-      const isGrowthSmall = Math.abs(status.nodes - lastNodes) <= 15 && Math.abs(status.textLen - lastTextLen) <= 40
+      const isGrowthSmall = Math.abs(status.nodes - lastNodes) <= 30 && Math.abs(status.textLen - lastTextLen) <= 80
       if (isGrowthSmall && lastNodes > 0) {
         stableRounds++
         if (stableRounds >= requiredStableRounds) break
@@ -541,7 +543,7 @@ export class MoliFetchProvider implements WebFetchProvider {
 
       lastNodes = status.nodes
       lastTextLen = status.textLen
-      await sleep(Math.min(isDocPage ? 100 : 350, deadline.remainingMs()))
+      await sleep(Math.min(isDocPage ? 100 : 200, deadline.remainingMs()))
     }
   }
 

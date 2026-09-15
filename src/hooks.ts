@@ -73,10 +73,11 @@ export async function deepScrollContainers(page: CdpPage): Promise<DeepScrollRes
 
         const candidates = document.querySelectorAll('div, section, article, main, aside, nav, ul, ol, pre, table');
         for (const el of candidates) {
-          if (el === docEl || el.offsetWidth <= 0 || el.offsetHeight <= 0) continue;
+          if (el === docEl) continue;
+          if (el.clientHeight <= 0 || el.scrollHeight <= el.clientHeight + 20) continue;
           const style = window.getComputedStyle(el);
           const oy = style.overflowY || style.overflow;
-          if (/(auto|scroll|overlay)/.test(oy) && el.scrollHeight > el.clientHeight + 20) {
+          if (/(auto|scroll|overlay)/.test(oy)) {
             scrollables.push(el);
           }
         }
