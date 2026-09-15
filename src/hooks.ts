@@ -83,9 +83,16 @@ export async function deepScrollContainers(page: CdpPage): Promise<DeepScrollRes
 
         for (const el of scrollables) {
           el.scrollTop = el.scrollHeight;
+          try {
+            el.dispatchEvent(new Event('scroll', { bubbles: true }));
+          } catch {}
         }
 
-        window.scrollTo(0, document.documentElement ? document.documentElement.scrollHeight : (document.body ? document.body.scrollHeight : 999999));
+        const maxScrollY = document.documentElement ? document.documentElement.scrollHeight : (document.body ? document.body.scrollHeight : 999999);
+        window.scrollTo(0, maxScrollY);
+        try {
+          window.dispatchEvent(new Event('scroll', { bubbles: true }));
+        } catch {}
 
         const lastItem = document.querySelector(
           '[class*="card"]:last-child, [class*="item"]:last-child, [class*="model"]:last-child'

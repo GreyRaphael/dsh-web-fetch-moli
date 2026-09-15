@@ -45,7 +45,7 @@ const MAX_PIPELINE_INPUT_CHARS = 2_000_000
 const QUEUE_TIMEOUT_MS = 20_000
 
 /** Default per-fetch budget (ms) - strictly below harness 30s tool timeout. */
-const DEFAULT_TIMEOUT_MS = 24_000
+const DEFAULT_TIMEOUT_MS = 26_000
 
 /** Post-DOM settle wait (ms) so dynamic micro-frontend modules settle. */
 const SETTLE_MS = 500
@@ -421,7 +421,7 @@ export class MoliFetchProvider implements WebFetchProvider {
    */
   private async settleDynamicSpa(page: CdpPage, deadline: Deadline): Promise<void> {
     if (typeof page.evaluate !== 'function') return
-    const maxWaitMs = 7_000
+    const maxWaitMs = 10_000
     const start = Date.now()
 
     while (Date.now() - start < maxWaitMs && deadline.remainingMs() > 4_000) {
@@ -432,14 +432,27 @@ export class MoliFetchProvider implements WebFetchProvider {
             const body = document.body;
             if (!body) return true;
 
-            const hasSpinner = Boolean(document.querySelector('.ant-spin, .anticon-spin, [class*="spin"], [class*="skeleton"], [class*="loading"]'));
+            // 1. Explicit full-screen overlay or loading masks (e.g. AliyunConsoleOverlay)
+            const overlay = document.getElementById('AliyunConsoleOverlay') || document.querySelector('[id*="ConsoleOverlay"], [id*="loading-mask"]');
+            if (overlay) {
+              const style = window.getComputedStyle(overlay);
+              if (style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0') {
+                return true;
+              }
+            }
+
+            // 2. Explicit loading spinners
+            const hasSpinner = Boolean(document.querySelector('.ant-spin:not(.ant-spin-nested-loading), .anticon-spin, [class*="skeleton-active"], [class*="skeleton-element"]'));
             if (hasSpinner) return true;
 
-            // Check if page already has structured documentation/article content
+            // 3. Structured documentation or substantial article content
             const hasDoc = Boolean(document.querySelector('article, .markdown-body, .docs-content, table'));
-            if (hasDoc) return false;
+            if (hasDoc) {
+              const docText = (body.textContent || '').trim().length;
+              if (docText > 800) return false;
+            }
 
-            // Check if an SPA root exists (e.g. #root, #app, subapps)
+            // 4. SPA root / micro-frontend subapps
             const appRoot = document.querySelector('#root, #app, [id*="subapp"], [id*="micro"]');
             if (appRoot) {
               const rootCards = appRoot.querySelectorAll("[class*='card'], [class*='item'], [class*='model'], tr").length;
@@ -451,11 +464,11 @@ export class MoliFetchProvider implements WebFetchProvider {
               return true;
             }
 
-            // General content cards or table rows (for non-#root pages)
+            // 5. General content cards or table rows (for non-#root pages)
             const cardCount = document.querySelectorAll("[class*='card'], [class*='model'], tr").length;
             if (cardCount >= 5) return false;
 
-            // Visible text length (excluding script/style)
+            // 6. Visible text length (excluding script/style)
             const clone = body.cloneNode(true);
             const toRemove = clone.querySelectorAll('script, style, noscript');
             toRemove.forEach(el => el.remove());
@@ -483,12 +496,25 @@ export class MoliFetchProvider implements WebFetchProvider {
   private async runDeepContainerScrolling(page: CdpPage, deadline: Deadline): Promise<void> {
     if (typeof page.evaluate !== 'function') return
 
+    // Documentation / article pages without card catalogs settle much faster
+    const isDocPage = Boolean(await page.evaluate(`
+      (() => {
+        const hasDoc = Boolean(document.querySelector('article, .markdown-body, .docs-content, table'));
+        const textLen = (document.body ? (document.body.textContent || '') : '').trim().length;
+        const hasCards = document.querySelectorAll("[class*='card'], [class*='model']").length;
+        return hasDoc && textLen > 800 && hasCards < 5;
+      })()
+    `).catch(() => false))
+
+    const maxRounds = isDocPage ? 2 : MAX_SCROLL_ROUNDS
+    const requiredStableRounds = isDocPage ? 1 : 3
+
     let lastNodes = 0
     let lastTextLen = 0
     let stableRounds = 0
 
-    for (let round = 1; round <= MAX_SCROLL_ROUNDS; round++) {
-      if (deadline.remainingMs() < 5_000) break
+    for (let round = 1; round <= maxRounds; round++) {
+      if (deadline.remainingMs() < 2_500) break
 
       const status = await deepScrollContainers(page)
 
@@ -497,25 +523,25 @@ export class MoliFetchProvider implements WebFetchProvider {
         break
       }
 
-      // First round cold start: if no scrollables found yet, allow 1 retry for layout to compute
+      // Cold start: if no scrollables found yet, allow up to 4 retries for layout to compute
       if (status.scrollablesCount === 0) {
-        if (round >= 2) break
-        await sleep(Math.min(300, deadline.remainingMs()))
+        if (round >= (isDocPage ? 2 : 4)) break
+        await sleep(Math.min(350, deadline.remainingMs()))
         continue
       }
 
-      // Plateau detection: exit when DOM nodes and text length stabilize for 2 consecutive rounds
+      // Plateau detection: exit when DOM nodes and text length stabilize
       const isGrowthSmall = Math.abs(status.nodes - lastNodes) <= 15 && Math.abs(status.textLen - lastTextLen) <= 40
       if (isGrowthSmall && lastNodes > 0) {
         stableRounds++
-        if (stableRounds >= 2) break
+        if (stableRounds >= requiredStableRounds) break
       } else {
         stableRounds = 0
       }
 
       lastNodes = status.nodes
       lastTextLen = status.textLen
-      await sleep(Math.min(250, deadline.remainingMs()))
+      await sleep(Math.min(isDocPage ? 100 : 350, deadline.remainingMs()))
     }
   }
 

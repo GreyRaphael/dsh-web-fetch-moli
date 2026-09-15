@@ -436,18 +436,29 @@ export class NativeCdpPage implements CdpPage {
         if (inFlight || this.isClosed) return
         inFlight = true
         try {
-          const evalPromise = this.evaluate(`
-            (() => ({ state: document.readyState, href: location.href }))()
-          `)
-          const info = await Promise.race([
-            evalPromise,
-            new Promise<null>((r) => setTimeout(() => r(null), 800)),
-          ]).catch(() => null) as { state?: string; href?: string } | null
+          const evalRes = await Promise.race([
+            this.send('Runtime.evaluate', {
+              expression: `(() => {
+                const body = document.body;
+                const textLen = (body ? (body.innerText || body.textContent || '') : '').trim().length;
+                const title = document.title || '';
+                return {
+                  state: document.readyState,
+                  href: location.href,
+                  hasSubstantialDom: Boolean(body && (textLen > 300 || body.children.length > 5 || (title.length > 3 && textLen > 50)))
+                };
+              })()`,
+              returnByValue: true,
+              awaitPromise: false,
+            }) as Promise<{ result?: { value?: { state?: string; href?: string; hasSubstantialDom?: boolean } } }>,
+            new Promise<null>((r) => setTimeout(() => r(null), 500)),
+          ]).catch(() => null)
 
+          const info = evalRes?.result?.value
           if (info && typeof info.state === 'string') {
             const hasNavigated = Boolean(info.href && !info.href.startsWith('about:blank'))
             if (hasNavigated) {
-              if (info.state === 'interactive' || info.state === 'complete') {
+              if (info.state === 'interactive' || info.state === 'complete' || info.hasSubstantialDom) {
                 this.triggerDomContentLoaded()
               }
               if (info.state === 'complete') {
@@ -460,7 +471,7 @@ export class NativeCdpPage implements CdpPage {
         } finally {
           inFlight = false
         }
-      }, 250)
+      }, 200)
 
       await waitPromise
       this.currentUrl = url
@@ -508,12 +519,22 @@ export class NativeCdpPage implements CdpPage {
           if (inFlight || this.isClosed) return
           inFlight = true
           try {
-            const evalPromise = this.evaluate('document.readyState')
+            const evalPromise = this.evaluate(`
+              (() => {
+                const body = document.body;
+                const textLen = (body ? (body.innerText || body.textContent || '') : '').trim().length;
+                const children = body ? body.children.length : 0;
+                return {
+                  state: document.readyState,
+                  hasSubstantialDom: Boolean(body && (textLen > 500 || children > 10))
+                };
+              })()
+            `)
             const rs = await Promise.race([
               evalPromise,
               new Promise<null>((r) => setTimeout(() => r(null), 800)),
-            ]).catch(() => null)
-            if (rs === 'interactive' || rs === 'complete') {
+            ]).catch(() => null) as { state?: string; hasSubstantialDom?: boolean } | null
+            if (rs && (rs.state === 'interactive' || rs.state === 'complete' || rs.hasSubstantialDom)) {
               this.triggerDomContentLoaded()
             }
           } catch {} finally {
@@ -639,6 +660,13 @@ export class NativeCdpPage implements CdpPage {
       this.triggerDomContentLoaded()
     } else if (method === 'Page.loadEventFired') {
       this.triggerLoadFired()
+    } else if (method === 'Page.frameStoppedLoading') {
+      const frameId = params.frameId as string | undefined
+      if (!frameId || frameId === this.mainFrameId) {
+        this.triggerDomContentLoaded()
+      }
+    } else if (method === 'Page.navigatedWithinDocument') {
+      this.triggerDomContentLoaded()
     } else if (method === 'Page.frameNavigated') {
       const frame = params.frame as { id?: string; url?: string } | undefined
       if (frame?.id === this.mainFrameId && frame.url) {
