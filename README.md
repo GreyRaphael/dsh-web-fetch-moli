@@ -2,7 +2,7 @@
 
 [中文](./README.zh-CN.md) · [GitHub](https://github.com/GreyRaphael/dsh-web-fetch-moli)
 
-A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) plugin providing a **Moli** backend for the `web_fetch` tool. Built on [Moli](https://github.com/lexmount/moli) (an ultra-lightweight Rust headless browser), it renders dynamic micro-frontends, single-page applications (SPAs), and static sites with **~60MB memory footprint** (>90% reduction compared to ~1GB for standard Chromium/Playwright), denoises pages via **Readability + DOMPurify**, and returns clean GitHub Flavored Markdown.
+A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) plugin providing a **Moli** backend for the `web_fetch` tool. Built on [Moli](https://github.com/lexmount/moli) (an ultra-lightweight Rust headless browser), it renders dynamic micro-frontends, single-page applications (SPAs), and static sites with **~60MB memory footprint** (>90% reduction compared to ~1GB for standard Chromium/Playwright), denoises pages via **LinkeDOM + Readability + mdream**, and returns clean, LLM-optimized GitHub Flavored Markdown.
 
 ## Key Highlights
 
@@ -12,7 +12,7 @@ A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) plug
   - `local` *(default)*: Automatically manages a local `moli serve` daemon over CDP, providing full SPA and micro-frontend execution.
   - `cdp`: Connects to an existing remote Moli or Chromium CDP service over Chrome DevTools Protocol.
   - `cli`: Directly executes one-shot `moli fetch`, zero background daemon, ultra-fast cold start.
-- **Denoise Pipeline** — Mozilla Readability extracts primary content, DOMPurify strips noise tags (ads, nav bars, footers, forms), and Turndown with GFM converts to Markdown. Inline base64 images are elided to compact size placeholders.
+- **High-Performance Two-Stage Denoise Pipeline** — LinkeDOM + Mozilla Readability extracts primary content and eliminates noise (ads, nav bars, footers, forms), followed by mdream (Rust native with pure JS fallback) for high-fidelity, LLM-optimized Markdown conversion. Inline base64 images are elided to compact size placeholders.
 - **Cloudflare Challenge Resilience** — Detects `cf-mitigated: challenge` interstitials and waits in the same page/context for natural clearance without artificial bot behavior.
 
 ## Performance & Architecture Comparison
@@ -35,7 +35,7 @@ web_fetch (tool-web)
         ├─ cdp:   connectOverCDP(remoteEndpoint)
         ├─ cli:   spawns `moli fetch <url> --dump html` (zero daemon)
         ├─ page.goto → sentinel triggers → settle (networkidle) → page.content()
-        ├─ denoise: Readability → DOMPurify → Turndown (GFM)
+        ├─ denoise: LinkeDOM (DOM) → Readability (article extract) → mdream (Markdown)
         └─ Markdown (or raw HTML when denoise is disabled)
 ```
 
@@ -75,7 +75,7 @@ The settings card (设置 → 插件 → 插件配置 → *Moli 网页爬取*) c
 | `bypassCsp` | `true` | Bypasses Content Security Policy via CDP `Page.setBypassCSP`, unlocking micro-frontend dynamic script loading. |
 | `autoScrollSentinel` | `true` | Programmatically triggers `IntersectionObserver` load-more sentinels for structure-first geometry. |
 | `shareBrowserContext` | `true` | Preserves cookies and localStorage across fetches. Unchecked: fresh isolated context per fetch. |
-| `denoise` | `true` | Runs Readability + DOMPurify to strip ads, navbars, and footers before Markdown conversion. |
+| `denoise` | `true` | Runs LinkeDOM + Readability + mdream to strip ads, navbars, and footers before LLM-optimized Markdown conversion. |
 | `maxConcurrency` | *(auto)* | Max concurrent rendering slots (auto: local 20, remote CDP 50, CLI 8). |
 | `challengeWaitMs` | `15000` | Bounded wait (ms) for Cloudflare verification to clear naturally. |
 | `challengeRetries` | `1` | Same-page retry attempts after challenge wait. |

@@ -109,6 +109,7 @@ export default [
     dts: false,
     clean: false,
     deps: {
+      onlyBundle: false,
       alwaysBundle: ['linkedom', '@mozilla/readability', '@mdream/js'],
       neverBundle: ['mdream'],
     },

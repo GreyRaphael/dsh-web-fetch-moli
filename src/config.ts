@@ -72,7 +72,7 @@ export interface Config {
    * and dynamic SPA card loading relies on load-more sentinels.
    */
   autoScrollSentinel?: boolean
-  /** Whether the Readability + DOMPurify denoise pipeline runs before markdown. */
+  /** Whether the Readability + mdream denoise pipeline runs before markdown. */
   denoise?: boolean
   /**
    * Bounded wait (ms) for a Cloudflare challenge to clear naturally.

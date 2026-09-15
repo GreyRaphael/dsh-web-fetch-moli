@@ -8,7 +8,7 @@ import { htmlToMarkdown } from '../src/markdown.ts'
 
 /** A typical docs/blog page: header nav, sidebar, article, footer, ad slots. */
 const ARTICLE_PAGE = `<!doctype html>
-<html><head><title>Playwright guide</title><style>.x{color:red}</style></head>
+<html><head><title>Moli guide</title><style>.x{color:red}</style></head>
 <body>
 <nav><a href="/">Home</a> <a href="/docs">Docs</a> <a href="/blog">Blog</a></nav>
 <aside id="sidebar"><div>Related</div><ul><li><a href="/a">link one</a></li><li><a href="/b">link two</a></li></ul></aside>
@@ -76,7 +76,7 @@ describe('htmlToMarkdown', () => {
     expect(mode).toBe('article')
     // The extracted title leads the markdown (Readability kept the article's
     // own heading structure, so the prepended title is the page <title>).
-    expect(markdown).toContain('# Playwright guide')
+    expect(markdown).toContain('# Moli guide')
     expect(markdown).toContain('Getting started')
     expect(markdown).toContain('reliable end-to-end testing')
     expect(markdown).toMatch(/-\s+Auto-wait for elements/)

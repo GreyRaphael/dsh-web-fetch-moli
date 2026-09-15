@@ -685,7 +685,7 @@ describe('MoliFetchProvider CDP backend', () => {
       challengeWaitMs: 0,
       challengeRetries: 0,
     }))
-    // Real bundled playwright-core; port 1 refuses connections immediately.
+    // Real native CDP client; port 1 refuses connections immediately.
     const error = await provider.fetch({ url: 'https://example.com/x' }).then(() => { throw new Error('expected rejection') }, (e: unknown) => e)
     expect(error).toBeInstanceOf(WebError)
     expect((error as WebError).code).toBe('WEB_PROVIDER_ERROR')

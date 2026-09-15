@@ -4,7 +4,7 @@
  * Cloudflare edge (managed challenge that clears naturally after ~6.5s in a
  * real browser, an SPA-clearing variant, and a never-clearing hard case),
  * fetched twice through the provider — once with the challenge wait off
- * (the 0.2.4 baseline behavior), once with it on.
+ * (the challengeWaitMs=0 baseline behavior), once with it on.
  *
  * Usage: node scripts/challenge-demo.mjs   (from the repo root, after build)
  */

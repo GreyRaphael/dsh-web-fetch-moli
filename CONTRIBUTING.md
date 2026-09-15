@@ -9,7 +9,7 @@ src/
 ├── index.ts           # host entry: registers provider + settings section
 ├── config.ts          # schemastery schema, CDP endpoint normalizer
 ├── provider.ts        # WebFetchProvider: navigation, deadline, semaphore, caps
-├── markdown.ts        # denoise pipeline (Readability + DOMPurify + Turndown/GFM)
+├── markdown.ts        # denoise pipeline (LinkeDOM + Readability + mdream)
 ├── moli-resolve.ts    # local backend discovery and auto-download
 ├── moli-process.ts    # local managed Moli daemon lifecycle
 ├── cli-runner.ts      # direct one-shot CLI execution

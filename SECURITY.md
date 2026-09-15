@@ -26,7 +26,7 @@ Repair policy: confirmed issues get a fix, a version bump, a `CHANGELOG.md` entr
 | --- | --- | --- |
 | Internal network | Page fetch reaches private/link-local hosts | None by design (provider stance); restrict who may call `web_fetch`, run in a network-scoped environment |
 | Settings page | CDP endpoint reconfiguration to an attacker-controlled browser | Trusted-environment deployment only; loopback checks deliberately not enforced |
-| Fetched page | Malicious JS runs in the headless browser | Browser is headless, session/context are fresh per fetch, resource subrequests (image/font/media) are aborted, page output passes Readability + DOMPurify before conversion |
+| Fetched page | Malicious JS runs in the headless browser | Browser is headless, session/context are fresh per fetch, resource subrequests (image/font/media) are aborted, page output passes Readability + mdream before conversion |
 | Workspace data | Rendered page content stored in sessions | Same as any `web_fetch` output — treat fetched content as untrusted data |
 
 ## Supported versions

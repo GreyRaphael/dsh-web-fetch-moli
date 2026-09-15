@@ -2,7 +2,7 @@
 /**
  * Online A/B probe for the issue #2 bounded challenge wait: fetch ONE real
  * URL twice through the provider — once with the challenge wait off (the
- * 0.2.4 baseline behavior), once with it on — and print what each returned.
+ * challengeWaitMs=0 baseline behavior), once with it on — and print what each returned.
  *
  * Usage:
  *   node scripts/challenge-online.mjs <url> [--wait ms] [--retries n] [--cdp host:port]

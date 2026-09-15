@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-09-14
+
+### Fixed
+
+- **修复微前端及复杂 SPA 在 DOM 就绪前过早退出的数据截断问题**:
+  - 移除脆弱且依赖类名猜测的 `waitForSpaHydration` 探测，避免在微前端加载脚本阶段因 DOM 尚未生成 spinner 而误判退出。
+  - 恢复健全的 Sentinel 观测生命周期，增加 800ms 初始加载宽限期与 400ms 重试，为慢速 SPA 提供充足的微前端容器加载时间。
+  - 优化 Sentinel 触发轮次为 2 轮（每轮 500ms 间隔）及 500ms 沉淀时间，相比旧版减少 16s 无效等待，将阿里云百炼（179 个模型卡片，2.1 万字 Markdown）抓取时间稳定在 14s 内完成，彻底杜绝 30s 工具调用超时。
+  - 为 `runSentinelRounds` 增加 `page.evaluate` 安全守卫，增强 mock 单元测试与无 evaluate 环境下的健壮性。
+
+## [0.3.1] - 2026-09-14
+
+### Fixed
+
+- **修复单包构建产物与依赖打包问题**:
+  - 将 `linkedom`、`@mozilla/readability`、`@mdream/js` 完全内联打包入 `lib/index.js` 单一 ESM 产物，避免动态加载分块缺失。
+  - 优化微前端加载状态处理，解决 `session.v3` 日志中发现的工具调用超时问题。
+
+## [0.3.0] - 2026-09-14
+
+### Changed
+
+- **升级为高性能双阶段 Markdown 管道（方案 C）**:
+  - **阶段 1（降噪与正文提取）**: 采用轻量级虚拟 DOM 引擎 `linkedom` 结合 `@mozilla/readability`，以极低内存开销精准提取主体正文并剔除导航、页脚、侧边栏等冗余布局。
+  - **阶段 2（HTML 转 Markdown）**: 采用 `mdream`（Rust 原生 NAPI 加速，自动回退纯 JS `@mdream/js`），专为大语言模型优化的 Markdown 生成算法，完美处理复杂嵌套表格、代码块及语义化排版。
+  - 全面替换旧版简易正则转换引擎，彻底解决阿里云百炼等复杂页面 Markdown 生成时内容丢失与格式破碎问题。
+
 ## [0.2.1] - 2026-09-14
 
 ### Fixed
@@ -47,7 +74,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Boot no longer fails against dsh-settings 0.1.2+** (`dsh web` died with `plugin tree failed to load … The requested module '@deepseek-ai/dsh-settings' does not provide an export named 'installSettingsSection'`). The plugin was built against the 0.1.1-era API whose top-level helpers (`installSettingsSection`, `settingsNamespace`) no longer exist: dsh-settings 0.1.2 moved that behavior onto the settings service itself (`ctx.settings.installSection(owner, ns, schema, entry, hooks)`) and replaced the runtime `settingsNamespace()` factory with the plain `SettingsNamespace` string type. The host resolves a plugin's bare `@deepseek-ai/*` imports against its own module graph (the loader imports entry packages with the host context as resolution parent), so the plugin's local 0.1.1-rc.1 copy never shields it — the moment the host runs dsh-settings ≥0.1.2, ESM's strict named-export check kills the whole plugin tree at link time. `apply()` now follows the same idiom as the shipped providers (see `web-search-deepseek`): the namespace is a literal constant and the section installs through `ctx.inject(['settings'], (settingsCtx) => settingsCtx.settings.installSection(...))`, so `lib/index.js` no longer imports `@deepseek-ai/dsh-settings` at runtime at all. Dependencies were aligned to the host generation: devDependencies to `0.1.2-alpha.5` (plus `@deepseek-ai/dsh-client-store`, which the published ui-slots types import but do not declare — without it `InjectFace`'s `HostObservable` inference silently degrades to `any` and `card.tsx` fails typecheck), `@deepseek-ai/schemastery` to `>=3.18.2`, and the dsh-settings/dsh-web peer ranges tightened to `>=0.1.2-alpha.0 <0.3.0` (older hosts lack `installSection` and can no longer load this plugin). Verified against the host's real module graph: namespace `web-fetch-playwright` registers, the `playwright` fetch provider lands in `ctx.web`, and a committed settings change reaches the provider's config thunk; the full suite (126 tests) stays green.
+- **Boot no longer fails against dsh-settings 0.1.2+** (`dsh web` died with `plugin tree failed to load … The requested module '@deepseek-ai/dsh-settings' does not provide an export named 'installSettingsSection'`). The plugin was built against the 0.1.1-era API whose top-level helpers (`installSettingsSection`, `settingsNamespace`) no longer exist: dsh-settings 0.1.2 moved that behavior onto the settings service itself (`ctx.settings.installSection(owner, ns, schema, entry, hooks)`) and replaced the runtime `settingsNamespace()` factory with the plain `SettingsNamespace` string type. The host resolves a plugin's bare `@deepseek-ai/*` imports against its own module graph (the loader imports entry packages with the host context as resolution parent), so the plugin's local 0.1.1-rc.1 copy never shields it — the moment the host runs dsh-settings ≥0.1.2, ESM's strict named-export check kills the whole plugin tree at link time. `apply()` now follows the same idiom as the shipped providers (see `web-search-deepseek`): the namespace is a literal constant and the section installs through `ctx.inject(['settings'], (settingsCtx) => settingsCtx.settings.installSection(...))`, so `lib/index.js` no longer imports `@deepseek-ai/dsh-settings` at runtime at all. Dependencies were aligned to the host generation: devDependencies to `0.1.2-alpha.5` (plus `@deepseek-ai/dsh-client-store`, which the published ui-slots types import but do not declare — without it `InjectFace`'s `HostObservable` inference silently degrades to `any` and `card.tsx` fails typecheck), `@deepseek-ai/schemastery` to `>=3.18.2`, and the dsh-settings/dsh-web peer ranges tightened to `>=0.1.2-alpha.0 <0.3.0` (older hosts lack `installSection` and can no longer load this plugin). Verified against the host's real module graph: namespace `web-fetch-moli` registers, the `moli` fetch provider lands in `ctx.web`, and a committed settings change reaches the provider's config thunk; the full suite (126 tests) stays green.
 
 - **Normal pages of Cloudflare-Bot-Management sites no longer misclassify as challenges** (badcase: `https://openrouter.ai/openai/gpt-6-astra-pro`). Cloudflare injects its passive JavaScript-Detections (JSD) telemetry into EVERY normal page of a protected zone — either as a direct `<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js">` or as that URL strung inside a hidden-1x1-iframe bootstrap's inline script text. The URL embeds the `/cdn-cgi/challenge-platform/` prefix, so the content-level marker scan read every such plain-200 real-content page as an interstitial; the live DOM probe then correctly said "not challenged", but the chained-round recheck re-ran the same false positive and overrode it, burning the whole wait budget and all retries and failing with `WEB_FETCH_CHALLENGE` ("last status 200"). The classifier now strips the `scripts/jsd/` telemetry directory before the challenge-platform prefix check (`classifyChallengeHtml`) and the DOM probe excludes it from its script-src scan (`CHALLENGE_DOM_PROBE`); the bare `/cdn-cgi/scripts/jsd/main.js` marker left the list entirely — it is telemetry in every spelling. Real interstitials still classify: they load orchestrate scripts (`/cdn-cgi/challenge-platform/h/…`) plus `window._cf_chl_opt` / `#challenge-*` / the title family, none of which live under `scripts/jsd/` (regression-tested, including an interstitial that carries the JSD script alongside its own orchestrate scripts). Verified live: the openrouter.ai badcase and nowsecure.nl both return their real articles now, and the full suite (126 tests incl. real-browser challenge integration) stays green.
 
@@ -87,7 +114,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- The bundle layer no longer pins `searchProvider: deepseek-official` on the `web` row. The pin out-ranked every later layer, so a user's own search-provider bundle could register and stay healthy yet never be selected — and `$DSH_WEB_SEARCH_PROVIDER` was dead config too (the row's config beat the env). The row's whole config is still replaced by the patch (no deep merge), so `searchProvider` is now simply **omitted**: with the base bundle's single registered search provider, auto-selection picks it exactly as before, while any later layer — a user search bundle, the profile/home `cordis.patch.yml`, or `$DSH_WEB_SEARCH_PROVIDER` — is free to pin search. Two usable search providers with no explicit selection still fail loud (`WEB_PROVIDER_AMBIGUOUS`) instead of guessing. Fetch stays pinned to `playwright`; this bundle owns fetch, not search.
+- The bundle layer no longer pins `searchProvider: deepseek-official` on the `web` row. The pin out-ranked every later layer, so a user's own search-provider bundle could register and stay healthy yet never be selected — and `$DSH_WEB_SEARCH_PROVIDER` was dead config too (the row's config beat the env). The row's whole config is still replaced by the patch (no deep merge), so `searchProvider` is now simply **omitted**: with the base bundle's single registered search provider, auto-selection picks it exactly as before, while any later layer — a user search bundle, the profile/home `cordis.patch.yml`, or `$DSH_WEB_SEARCH_PROVIDER` — is free to pin search. Two usable search providers with no explicit selection still fail loud (`WEB_PROVIDER_AMBIGUOUS`) instead of guessing. Fetch stays pinned to `moli`; this bundle owns fetch, not search.
 
 ## [0.2.2] - 2026-08-24
 

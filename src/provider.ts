@@ -5,7 +5,7 @@
  * Provides:
  * - Ultra-lightweight footprint (~60MB RAM per daemon, compared to ~1GB for standard Chromium).
  * - Full micro-frontend and SPA support via CDP `Page.setBypassCSP` and `IntersectionObserver` sentinel triggers.
- * - Robust Cloudflare challenge wait and Readability + DOMPurify denoise markdown conversion.
+ * - Robust Cloudflare challenge wait and LinkeDOM + Readability + mdream denoise markdown pipeline.
  * - Strict URL hygiene and error taxonomy parity with DeepSeek Harness specifications.
  *
  * @module dsh-web-fetch-moli/provider
