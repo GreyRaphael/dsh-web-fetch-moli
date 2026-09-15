@@ -109,6 +109,29 @@ export const Config: z<Config> = z.object({
 export type ResolvedConfig = Omit<Required<Config>, 'maxConcurrency'> & { maxConcurrency?: number }
 
 /**
+ * Resolves a raw config by validating and filling schema defaults via Schemastery.
+ */
+export function resolveConfig(raw?: Config): ResolvedConfig {
+  const base: ResolvedConfig = {
+    backend: raw?.backend ?? 'local',
+    moliPath: raw?.moliPath ?? '',
+    cdpEndpoint: raw?.cdpEndpoint ?? '',
+    shareBrowserContext: raw?.shareBrowserContext !== false,
+    bypassCsp: raw?.bypassCsp !== false,
+    autoScrollSentinel: raw?.autoScrollSentinel !== false,
+    denoise: raw?.denoise !== false,
+    maxConcurrency: raw?.maxConcurrency,
+    challengeWaitMs: raw?.challengeWaitMs ?? DEFAULT_CHALLENGE_WAIT_MS,
+    challengeRetries: raw?.challengeRetries ?? DEFAULT_CHALLENGE_RETRIES,
+  }
+  try {
+    return Config(raw ?? {}) as ResolvedConfig
+  } catch {
+    return base
+  }
+}
+
+/**
  * The concurrency limit a fetch actually runs with.
  */
 export function effectiveMaxConcurrency(config: Pick<Config, 'backend' | 'maxConcurrency'>): number {

@@ -15,7 +15,7 @@ import { WebError } from '@deepseek-ai/dsh-web'
 import type { WebFetchProvider, WebFetchRequest, WebFetchResult } from '@deepseek-ai/dsh-web'
 import { CHALLENGE_DOM_PROBE, CHALLENGE_FINISH_RESERVE_MS, CHALLENGE_POLL_INTERVAL_MS, classifyChallengeHtml, classifyChallengeResponse, isChallengeCompatibleResponse } from './challenge.ts'
 import type { ChallengeVerdict } from './challenge.ts'
-import { DEFAULT_MAX_CONCURRENCY_CDP, DEFAULT_MAX_CONCURRENCY_CLI, DEFAULT_MAX_CONCURRENCY_LOCAL, effectiveChallengeRetries, effectiveChallengeWaitMs, effectiveContextMode, effectiveMaxConcurrency, normalizeCdpEndpoint } from './config.ts'
+import { DEFAULT_MAX_CONCURRENCY_CDP, DEFAULT_MAX_CONCURRENCY_CLI, DEFAULT_MAX_CONCURRENCY_LOCAL, effectiveChallengeRetries, effectiveChallengeWaitMs, effectiveContextMode, effectiveMaxConcurrency, normalizeCdpEndpoint, resolveConfig } from './config.ts'
 import type { ResolvedConfig } from './config.ts'
 import { CdpConnectionPool } from './cdp-pool.ts'
 import type { CdpConnect, CdpLease } from './cdp-pool.ts'
@@ -212,8 +212,8 @@ export class MoliFetchProvider implements WebFetchProvider {
     configSource: () => ResolvedConfig,
     cdpPoolOrConnect: CdpConnectionPool | CdpConnect = defaultCdpConnect,
   ) {
-    this.configSource = configSource
-    const initial = configSource()
+    this.configSource = () => resolveConfig(configSource())
+    const initial = this.configSource()
     this.semaphore = new Semaphore(effectiveMaxConcurrency(initial))
     this.cdpPool = cdpPoolOrConnect instanceof CdpConnectionPool
       ? cdpPoolOrConnect
@@ -230,7 +230,7 @@ export class MoliFetchProvider implements WebFetchProvider {
 
   async fetch(request: WebFetchRequest, signal?: AbortSignal): Promise<WebFetchResult> {
     if (signal?.aborted) throw new WebError('web fetch aborted', 'WEB_ABORTED')
-    const config = this.configSource()
+    const config = resolveConfig(this.configSource())
     const url = validateFetchUrl(request.url)
     const deadline = new Deadline(signal, DEFAULT_TIMEOUT_MS)
 
@@ -276,7 +276,7 @@ export class MoliFetchProvider implements WebFetchProvider {
         signal: deadline.signal,
       })
 
-      if (!config.denoise) {
+      if (config.denoise === false) {
         return capResult(url.toString(), cliResult.statusCode, { kind: 'html', content: cliResult.content })
       }
 
@@ -405,7 +405,7 @@ export class MoliFetchProvider implements WebFetchProvider {
     await page.waitForLoadState?.('networkidle', { timeout: Math.min(SETTLE_MS, deadline.remainingMs()) }).catch(() => {})
 
     const html = await page.content()
-    if (!config.denoise) {
+    if (config.denoise === false) {
       return capResult(finalUrl, statusCode, { kind: 'html', content: html })
     }
     const bounded = html.length > MAX_PIPELINE_INPUT_CHARS ? html.slice(0, MAX_PIPELINE_INPUT_CHARS) : html

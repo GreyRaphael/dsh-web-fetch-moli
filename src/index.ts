@@ -8,7 +8,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-settings'
 import type {} from '@deepseek-ai/dsh-web'
-import { Config } from './config.ts'
+import { Config, resolveConfig } from './config.ts'
 import type { ResolvedConfig } from './config.ts'
 import { MoliFetchProvider } from './provider.ts'
 import { resolveMoliBinary } from './moli-resolve.ts'
@@ -26,6 +26,7 @@ export {
   effectiveContextMode,
   effectiveMaxConcurrency,
   normalizeCdpEndpoint,
+  resolveConfig,
 } from './config.ts'
 export type { Config as MoliFetchConfig, CdpContextMode, MoliBackend, ResolvedConfig } from './config.ts'
 export { CdpConnectionPool } from './cdp-pool.ts'
@@ -60,11 +61,11 @@ export const WEB_FETCH_MOLI_SETTINGS_NAMESPACE = 'web-fetch-moli'
 
 /** Register the Moli fetch provider with `ctx.web`. */
 export function apply(ctx: Context, config: Config): void {
-  let current: () => ResolvedConfig = () => config as ResolvedConfig
+  let current: () => ResolvedConfig = () => resolveConfig(config)
   ctx.inject(['settings'], (settingsCtx) => {
     settingsCtx.settings.installSection(ctx, WEB_FETCH_MOLI_SETTINGS_NAMESPACE, Config, config, {
       setSource: (source) => {
-        current = source as () => ResolvedConfig
+        current = () => resolveConfig(source() as Config)
       },
       onChange: () => {},
     })
