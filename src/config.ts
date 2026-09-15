@@ -67,9 +67,9 @@ export interface Config {
    */
   bypassCsp?: boolean
   /**
-   * Whether to simulate IntersectionObserver sentinel visibility flips.
-   * Defaults to true. Essential for Moli's structure-first geometry where scrollHeight is 0
-   * and dynamic SPA card loading relies on load-more sentinels.
+   * Whether to perform Deep Container Scrolling for infinite-scroll / lazy-load pages.
+   * Defaults to true. Automatically discovers scrollable DOM containers, dispatches standard scroll
+   * events, and handles virtual lists and lazy-loaded card grids.
    */
   autoScrollSentinel?: boolean
   /** Whether the Readability + mdream denoise pipeline runs before markdown. */

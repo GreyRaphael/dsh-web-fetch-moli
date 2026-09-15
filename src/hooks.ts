@@ -1,7 +1,7 @@
 /**
  * Page-level hooks for Moli:
  * 1. Content Security Policy (CSP) bypass over CDP for micro-frontend sandboxes.
- * 2. IntersectionObserver sentinel hooks for structure-first geometry lazy loading.
+ * 2. Deep container scroll utilities for infinite scroll, virtual lists, and lazy-loading.
  *
  * @module dsh-web-fetch-moli/hooks
  */
@@ -9,59 +9,31 @@
 import type { CdpPage } from './types.ts'
 
 /**
- * Script injected at document start to track IntersectionObserver sentinels
- * for programmatic visibility triggering.
+ * Backward compatibility: formerly used for IntersectionObserver monkey patching.
+ * Now obsolete as Deep Container Scrolling uses native browser DOM mechanics.
  */
-export const SENTINEL_OBSERVER_INIT_SCRIPT = `
-(function() {
-  if (window.__moliSentinelHookInstalled) return;
-  window.__moliSentinelHookInstalled = true;
-  window.__sentinels = new Map();
-  window.__moliIoCount = 0;
-  const OrigIO = window.IntersectionObserver;
-  if (!OrigIO) return;
+export const SENTINEL_OBSERVER_INIT_SCRIPT = ''
 
-  window.IntersectionObserver = function(callback, options) {
-    window.__moliIoCount++;
-    const inst = new OrigIO(callback, options);
-    const origObserve = inst.observe;
-    const origUnobserve = inst.unobserve;
-
-    inst.observe = function(el) {
-      if (el && el.nodeType === 1) {
-        const cls = typeof el.className === 'string' ? el.className : (el.getAttribute ? el.getAttribute('class') || '' : '');
-        const id = el.id || '';
-        const testStr = (cls + ' ' + id).toLowerCase();
-        const isSentinel = /(sentinel|load-?more|infinite|scroll-?trigger|bottom-?anchor|page-?end)/i.test(testStr);
-        if (isSentinel) {
-          window.__sentinels.set(el, { inst, callback });
-        }
-      }
-      return origObserve.call(inst, el);
-    };
-
-    inst.unobserve = function(el) {
-      window.__sentinels.delete(el);
-      return origUnobserve.call(inst, el);
-    };
-
-    return inst;
-  };
-  window.IntersectionObserver.prototype = OrigIO.prototype;
-})();
-`
+/**
+ * Result of a single deep container scrolling round.
+ */
+export interface DeepScrollResult {
+  scrollablesCount: number
+  nodes: number
+  textLen: number
+}
 
 /**
  * Configure page-level hooks on a freshly opened page.
  *
  * @param page - CDP page.
- * @param options - hook options (bypassCsp, autoScrollSentinel).
+ * @param options - hook options (bypassCsp).
  */
 export async function setupPageHooks(
   page: CdpPage,
   options: { bypassCsp?: boolean; autoScrollSentinel?: boolean },
 ): Promise<void> {
-  // 1. Bypass CSP if enabled (crucial for micro-frontend dynamic script loading)
+  // Bypass CSP if enabled (crucial for micro-frontend dynamic script loading)
   if (options.bypassCsp !== false) {
     try {
       const context = page.context?.()
@@ -73,81 +45,96 @@ export async function setupPageHooks(
       // Best-effort
     }
   }
-
-  // 2. Install IntersectionObserver hook script
-  if (options.autoScrollSentinel !== false && typeof page.addInitScript === 'function') {
-    try {
-      await page.addInitScript(SENTINEL_OBSERVER_INIT_SCRIPT)
-    } catch {
-      // Best-effort
-    }
-  }
 }
 
 /**
- * Programmatically flip visibility of IntersectionObserver load-more sentinels
- * to trigger dynamic content loading in Moli.
+ * Perform a single round of deep container scrolling across all scrollable DOM elements,
+ * the window/document scrolling element, and the last item in the viewport.
+ *
+ * Discovers any element where `scrollHeight > clientHeight + 20` with `overflow-y: auto/scroll/overlay`,
+ * scrolls it to the bottom, dispatches standard `scroll` events, and triggers `scrollIntoView`
+ * on the trailing item for virtual-scroll and observer-driven paginations.
  *
  * @param page - CDP page.
- * @returns number of sentinels triggered.
+ * @returns count of scrollables found and DOM snapshot metrics.
+ */
+export async function deepScrollContainers(page: CdpPage): Promise<DeepScrollResult> {
+  if (typeof page.evaluate !== 'function') {
+    return { scrollablesCount: 0, nodes: 0, textLen: 0 }
+  }
+  try {
+    const res = await page.evaluate(`
+      (() => {
+        const docEl = document.scrollingElement || document.documentElement || document.body;
+        const scrollables = [];
+        if (docEl && docEl.scrollHeight > docEl.clientHeight + 20) {
+          scrollables.push(docEl);
+        }
+
+        const candidates = document.querySelectorAll('div, section, article, main, aside, nav, ul, ol, pre, table');
+        for (const el of candidates) {
+          if (el === docEl || el.offsetWidth <= 0 || el.offsetHeight <= 0) continue;
+          const style = window.getComputedStyle(el);
+          const oy = style.overflowY || style.overflow;
+          if (/(auto|scroll|overlay)/.test(oy) && el.scrollHeight > el.clientHeight + 20) {
+            scrollables.push(el);
+          }
+        }
+
+        for (const el of scrollables) {
+          el.scrollTop = el.scrollHeight;
+        }
+
+        window.scrollTo(0, document.documentElement ? document.documentElement.scrollHeight : (document.body ? document.body.scrollHeight : 999999));
+
+        const lastItem = document.querySelector(
+          '[class*="card"]:last-child, [class*="item"]:last-child, [class*="model"]:last-child'
+        );
+        if (lastItem && typeof lastItem.scrollIntoView === 'function') {
+          lastItem.scrollIntoView(false);
+        }
+
+        const nodes = document.querySelectorAll('*').length;
+        const textLen = (document.body ? (document.body.textContent || '') : '').length;
+        return { scrollablesCount: scrollables.length, nodes, textLen };
+      })()
+    `)
+    if (!res || typeof res !== 'object') {
+      return { scrollablesCount: 0, nodes: 0, textLen: 0 }
+    }
+    const r = res as Record<string, unknown>
+    return {
+      scrollablesCount: typeof r.scrollablesCount === 'number' ? r.scrollablesCount : 0,
+      nodes: typeof r.nodes === 'number' ? r.nodes : 0,
+      textLen: typeof r.textLen === 'number' ? r.textLen : 0,
+    }
+  } catch {
+    return { scrollablesCount: 0, nodes: 0, textLen: 0 }
+  }
+}
+
+/**
+ * Backward-compatible trigger for load-more sentinels.
+ * Delegates to Deep Container Scrolling.
+ *
+ * @param page - CDP page.
+ * @returns number of scrollables triggered.
  */
 export async function triggerSentinels(page: CdpPage): Promise<number> {
-  if (typeof page.evaluate !== 'function') return 0
-  try {
-    const count = await page.evaluate(`
-      (() => {
-        let triggered = 0;
-        if (window.__sentinels) {
-          for (const [el, { inst, callback }] of window.__sentinels.entries()) {
-            if (el && el.isConnected) {
-              callback([{ isIntersecting: false, target: el }], inst);
-              callback([{ isIntersecting: true, target: el }], inst);
-              triggered++;
-            }
-          }
-        }
-        return triggered;
-      })()
-    `)
-    return typeof count === 'number' ? count : 0
-  } catch {
-    return 0
-  }
+  const res = await deepScrollContainers(page)
+  return res.scrollablesCount
 }
 
 /**
- * Check how many connected sentinels are currently tracked on the page.
+ * Backward-compatible helper returning active sentinel count (always 0 now).
  */
-export async function getSentinelCount(page: CdpPage): Promise<number> {
-  if (typeof page.evaluate !== 'function') return 0
-  try {
-    const count = await page.evaluate(`
-      (() => {
-        let count = 0;
-        if (window.__sentinels) {
-          for (const [el] of window.__sentinels.entries()) {
-            if (el && el.isConnected) count++;
-          }
-        }
-        return count;
-      })()
-    `)
-    return typeof count === 'number' ? count : 0
-  } catch {
-    return 0
-  }
+export async function getSentinelCount(_page: CdpPage): Promise<number> {
+  return 0
 }
 
 /**
- * Check if the page has instantiated any IntersectionObserver.
+ * Backward-compatible helper returning IntersectionObserver count (always 0 now).
  */
-export async function getIoCount(page: CdpPage): Promise<number> {
-  if (typeof page.evaluate !== 'function') return 0
-  try {
-    const count = await page.evaluate('window.__moliIoCount || 0')
-    return typeof count === 'number' ? count : 0
-  } catch {
-    return 0
-  }
+export async function getIoCount(_page: CdpPage): Promise<number> {
+  return 0
 }
-
