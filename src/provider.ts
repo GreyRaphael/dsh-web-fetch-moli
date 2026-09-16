@@ -446,7 +446,16 @@ export class MoliFetchProvider implements WebFetchProvider {
             // In SPA root containers (#root, #app), require root-internal content rather than outer navbars
             if (root) {
               const rootText = (root.innerText || root.textContent || '').trim();
-              if (rootText.length > 500 && cards > 0) return false;
+              const hasContent = cards > 0 || Boolean(root.querySelector('table, article, .markdown-body, [class*="content"]'));
+              if (rootText.length > 300 && hasContent) return false;
+              return true;
+            }
+
+            // If main/article container exists, wait until main-internal content has mounted
+            const main = document.querySelector('main, article, [role="main"], .markdown-body, .docs-content');
+            if (main) {
+              const mainText = (main.innerText || main.textContent || '').trim();
+              if (mainText.length > 200 || main.querySelectorAll('table, p, li').length >= 2) return false;
               return true;
             }
 
