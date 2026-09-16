@@ -12,7 +12,36 @@
 import type { CdpPage } from './types.ts'
 
 /**
+ * Helper to dispatch CDP command to a page or via its CDP session.
+ */
+async function sendCdp(page: CdpPage, method: string, params: Record<string, unknown> = {}): Promise<void> {
+  try {
+    if (typeof page.send === 'function') {
+      await page.send(method, params)
+    } else {
+      const context = page.context?.()
+      if (typeof context?.newCDPSession === 'function') {
+        const cdp = await context.newCDPSession(page)
+        await cdp.send(method, params)
+      }
+    }
+  } catch {
+    // Best-effort for cross-CDP engine compatibility
+  }
+}
+
+/**
  * Configure page-level CDP settings on a freshly opened page before navigation.
+ * Applies the 6 essential non-default CDP configurations:
+ * 1. Page.enable
+ * 2. Runtime.enable
+ * 3. Network.enable
+ * 4. Page.setBypassCSP: { enabled: true }
+ * 5. Security.setIgnoreCertificateErrors: { ignore: true }
+ * 6. Network.setBypassServiceWorker: { bypass: true }
+ *
+ * (Note: Emulation.setDeviceMetricsOverride [1920x1080] and navigator.webdriver=false
+ * are already native defaults in Moli's profile).
  *
  * @param page - CDP page.
  * @param options - hook options (bypassCsp).
@@ -21,29 +50,30 @@ export async function setupPageHooks(
   page: CdpPage,
   options: { bypassCsp?: boolean; autoScrollSentinel?: boolean } = {},
 ): Promise<void> {
-  // Bypass CSP if enabled (crucial for micro-frontend dynamic script loading)
-  if (options.bypassCsp !== false) {
-    await setBypassCsp(page)
-  }
+  // 1. 开启基础协议域 (Page, Runtime, Network)
+  await sendCdp(page, 'Page.enable')
+  await sendCdp(page, 'Runtime.enable')
+  await sendCdp(page, 'Network.enable')
+
+  // 2. 绕过 CSP 限制（受 DSH 前端/全局配置项 config.bypassCsp 控制，默认 true）
+  const bypassCsp = options.bypassCsp !== false
+  await sendCdp(page, 'Page.setBypassCSP', { enabled: bypassCsp })
+
+  // 3. 忽略证书错误（防止内网/自签名/代理抓包证书导致连接中断）
+  await sendCdp(page, 'Security.setIgnoreCertificateErrors', { ignore: true })
+
+  // 4. 穿透 Service Worker 缓存（确保获取最新线上内容）
+  await sendCdp(page, 'Network.setBypassServiceWorker', { bypass: true })
 }
 
 /**
  * Send CDP Page.setBypassCSP to globally bypass CSP restrictions in Moli.
+ *
+ * @param page - CDP page.
+ * @param enabled - whether CSP bypass is enabled (defaults to true).
  */
-export async function setBypassCsp(page: CdpPage): Promise<void> {
-  try {
-    if (typeof page.send === 'function') {
-      await page.send('Page.setBypassCSP', { enabled: true })
-    } else {
-      const context = page.context?.()
-      if (typeof context?.newCDPSession === 'function') {
-        const cdp = await context.newCDPSession(page)
-        await cdp.send('Page.setBypassCSP', { enabled: true })
-      }
-    }
-  } catch {
-    // Best-effort
-  }
+export async function setBypassCsp(page: CdpPage, enabled = true): Promise<void> {
+  await sendCdp(page, 'Page.setBypassCSP', { enabled })
 }
 
 export const MICRO_CLIP_VIEWPORT = { x: 0, y: 0, width: 1, height: 1, scale: 1 } as const
