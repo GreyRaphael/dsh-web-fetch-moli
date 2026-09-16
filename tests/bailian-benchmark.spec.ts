@@ -60,13 +60,16 @@ describe('Bailian micro-frontend real-world benchmark', () => {
       expect(result.body.kind).toBe('text')
       const markdown = result.body.content
 
-      console.log(`[Bailian Benchmark] Completed in ${elapsed.toFixed(2)}s, Markdown length: ${markdown.length} chars`)
+      const cardCount = (markdown.match(/最新版本/g) || []).length
+      console.log(`[Bailian Benchmark] Extracted model cards: ${cardCount}`)
+
       if (markdown.length < 100) {
         console.warn(`[Bailian Benchmark] Received short response (${markdown.length} chars), likely anti-bot redirect or geoblock from current network. Skipping assertions.`)
         return
       }
 
       expect(markdown.length).toBeGreaterThan(1000)
+      expect(cardCount).toBeGreaterThanOrEqual(179)
       expect(markdown).toMatch(/qwen|通义千问|百炼/i)
       expect(markdown).toMatch(/Qwen3\.8|179|模型/i)
     } finally {

@@ -19,7 +19,7 @@ import { DEFAULT_MAX_CONCURRENCY_CDP, DEFAULT_MAX_CONCURRENCY_CLI, DEFAULT_MAX_C
 import type { ResolvedConfig } from './config.ts'
 import { CdpConnectionPool } from './cdp-pool.ts'
 import type { CdpConnect, CdpLease } from './cdp-pool.ts'
-import { getIoCount, getSentinelCount, setupPageHooks, triggerSentinels } from './hooks.ts'
+import { forceLayoutMaterialization, scrollIntoViewIfNeededNative, setupPageHooks } from './hooks.ts'
 import { htmlToMarkdown } from './markdown.ts'
 import { MoliProcessManager } from './moli-process.ts'
 import { resolveCdpBackend, resolveMoliBinary } from './moli-resolve.ts'
@@ -45,7 +45,7 @@ const MAX_PIPELINE_INPUT_CHARS = 2_000_000
 const QUEUE_TIMEOUT_MS = 20_000
 
 /** Default per-fetch budget (ms) - strictly below harness 30s tool timeout. */
-const DEFAULT_TIMEOUT_MS = 24_000
+const DEFAULT_TIMEOUT_MS = 25_000
 
 /** Post-DOM settle wait (ms) so dynamic micro-frontend modules settle. */
 const SETTLE_MS = 500
@@ -421,7 +421,8 @@ export class MoliFetchProvider implements WebFetchProvider {
    */
   private async settleDynamicSpa(page: CdpPage, deadline: Deadline): Promise<void> {
     if (typeof page.evaluate !== 'function') return
-    const maxWaitMs = 7_000
+    const maxWaitMs = Math.min(15_000, deadline.remainingMs() - 8_000)
+    if (maxWaitMs <= 0) return
     const start = Date.now()
 
     while (Date.now() - start < maxWaitMs && deadline.remainingMs() > 4_000) {
@@ -435,21 +436,26 @@ export class MoliFetchProvider implements WebFetchProvider {
             const hasSpinner = Boolean(document.querySelector('.ant-spin, .anticon-spin, [class*="spin"], [class*="skeleton"], [class*="loading"]'));
             if (hasSpinner) return true;
 
-            // Check content elements (cards, models, articles, table rows)
-            const cardCount = document.querySelectorAll("[class*='card'], [class*='item'], [class*='model'], article, main, tr, table").length;
+            const root = document.querySelector('#root, #app, [id*="root"]');
+            const cards = document.querySelectorAll('._grid_q6822_1 > div, [class*="card"], [class*="item"], [class*="model"], [role="feed"] > *').length;
+            const sentinel = Boolean(document.querySelector('._loadMoreSentinel_q6822_63, [class*="sentinel" i], [class*="loadmore" i], [class*="load-more" i], [class*="infinite" i]'));
 
-            // Compute visible text length (excluding script/style)
-            const clone = body.cloneNode(true);
-            const toRemove = clone.querySelectorAll('script, style, noscript');
-            toRemove.forEach(el => el.remove());
-            const visibleText = (clone.textContent || '').trim();
+            // Settled if cards or sentinels have mounted into DOM
+            if (cards >= 5 || sentinel) return false;
 
-            // Settled if we have enough content cards OR substantial visible text (>600 chars)
-            if (cardCount >= 5 || visibleText.length > 600) {
-              return false;
+            // In SPA root containers (#root, #app), require root-internal content rather than outer navbars
+            if (root) {
+              const rootText = (root.innerText || root.textContent || '').trim();
+              if (rootText.length > 500 && cards > 0) return false;
+              return true;
             }
 
-            // Minimal text and few cards without spinner: still waiting for SPA hydration
+            // Static or document page fallback
+            const text = (body.innerText || body.textContent || '').trim();
+            const hasArticle = Boolean(document.querySelector('article, main, tr, table'));
+            if (hasArticle && text.length > 300) return false;
+            if (text.length > 600) return false;
+
             return true;
           })()
         `))
@@ -460,86 +466,64 @@ export class MoliFetchProvider implements WebFetchProvider {
       if (!isUnsettled) {
         break
       }
-      await sleep(Math.min(300, deadline.remainingMs()))
+      await sleep(Math.min(250, deadline.remainingMs()))
     }
   }
 
-  /** Run bounded rounds of sentinel visibility flips to load infinite cards. */
+  /**
+   * Native scroll rounds for dynamic SPA / infinite lists via Moli layout materialization
+   * and scrollIntoViewIfNeeded (moli_scroll scheme).
+   */
   private async runSentinelRounds(page: CdpPage, deadline: Deadline): Promise<void> {
     if (typeof page.evaluate !== 'function') return
 
-    // 1. Initial grace period for scripts to execute and instantiate observers
-    await sleep(Math.min(800, deadline.remainingMs()))
-
-    // If IntersectionObserver was never instantiated on this page, give one short retry
-    // for slow SPA entry bundles. If still 0, exit early since static/non-lazy pages have no sentinels.
-    let ioCount = await getIoCount(page)
-    if (ioCount === 0) {
-      await sleep(Math.min(400, deadline.remainingMs()))
-      ioCount = await getIoCount(page)
-      if (ioCount === 0) return
-    }
-
-    // 2. Wait for sentinel elements to mount into the DOM (e.g. async micro-frontend components)
-    // For articles / documentation pages that use IntersectionObserver for TOC or lazy images,
-    // avoid idling for 8 seconds if there are no infinite-scroll sentinel elements.
-    const isDocPage = await page.evaluate(`
+    // Quick check: if the page is a large static article or documentation without sentinels,
+    // skip scrolling to save latency.
+    const skipScroll = await page.evaluate(`
       (() => {
-        const hasSentinel = Boolean(document.querySelector('[class*="sentinel" i], [class*="loadmore" i], [class*="load-more" i], [class*="infinite" i], [id*="sentinel" i], [id*="loadmore" i], [id*="infinite" i]'));
+        const hasSentinel = Boolean(document.querySelector(
+          '._loadMoreSentinel_q6822_63, [class*="sentinel" i], [class*="loadmore" i], [class*="load-more" i], [class*="infinite" i], [class*="loading" i], [id*="sentinel" i], [id*="loadmore" i]'
+        ));
         if (hasSentinel) return false;
+        const hasGridOrFeed = Boolean(document.querySelector('._grid_q6822_1, [role="feed"]'));
+        if (hasGridOrFeed) return false;
         const textLen = (document.body?.innerText || document.body?.textContent || '').trim().length;
         const hasDocArticle = Boolean(document.querySelector('article, .markdown-body, .docs-content, table'));
-        return textLen > 2000 && hasDocArticle;
+        return textLen > 1500 && hasDocArticle;
       })()
     `).catch(() => false)
+    if (skipScroll) return
 
-    const waitStart = Date.now()
-    const maxSentinelWaitMs = isDocPage ? 600 : 8_000
-    let sentinelCount = await getSentinelCount(page)
-
-    while (sentinelCount === 0 && Date.now() - waitStart < maxSentinelWaitMs) {
-      if (deadline.remainingMs() < 6_000) break
-      await sleep(Math.min(250, deadline.remainingMs()))
-      sentinelCount = await getSentinelCount(page)
-      if (sentinelCount > 0) break
-    }
-
-    if (sentinelCount === 0) {
-      // Try one immediate trigger attempt in case sentinels bypassed counting
-      const fallbackTriggered = await triggerSentinels(page)
-      if (fallbackTriggered === 0) return
-    }
-
-    // 3. Trigger sentinel rounds until catalog is exhausted or MAX_SENTINEL_ROUNDS reached
-    let lastContentLen = 0
+    const maxRounds = 12
+    let lastCount = 0
     let unchangedRounds = 0
 
-    for (let round = 0; round < MAX_SENTINEL_ROUNDS; round++) {
-      if (deadline.remainingMs() < 5_000) break
+    for (let round = 1; round <= maxRounds; round++) {
+      if (deadline.remainingMs() < 4_000) break
 
-      const triggered = await triggerSentinels(page)
-      if (triggered === 0) break
+      // 1. Force layout materialization so Moli computes physical bounding boxes
+      await forceLayoutMaterialization(page)
 
-      // Wait for backend API response and DOM render of the new batch
-      await sleep(Math.min(500, deadline.remainingMs()))
+      // 2. Perform native scrollIntoViewIfNeeded on sentinel or trailing card
+      const res = await scrollIntoViewIfNeededNative(page)
 
-      // Track whether DOM content length grew
-      let currentLen = 0
-      try {
-        currentLen = typeof page.evaluate === 'function'
-          ? (await page.evaluate('document.body ? document.body.innerHTML.length : 0') as number)
-          : 0
-      } catch {
-        // Best effort
-      }
+      // If nothing was scrolled, this page has no scrollable target
+      if (!res.scrolled) break
 
-      if (currentLen > 0 && currentLen === lastContentLen) {
+      // 3. Termination check
+      if (res.cardsCount === lastCount) {
         unchangedRounds++
-        if (unchangedRounds >= 2) break
+        // If there's no sentinel (list reached bottom) or unchanged for 2 rounds
+        if (!res.hasSentinel || unchangedRounds >= 2) {
+          break
+        }
       } else {
         unchangedRounds = 0
-        lastContentLen = currentLen
+        lastCount = res.cardsCount
       }
+
+      // 4. Wait for network response and DOM render of new batch
+      await sleep(Math.min(1500, Math.max(200, deadline.remainingMs() - 4000)))
     }
   }
 

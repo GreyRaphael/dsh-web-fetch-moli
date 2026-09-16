@@ -360,6 +360,14 @@ export class NativeCdpPage implements CdpPage {
     return this.ctx.browser.send(method, params, this.sessionId)
   }
 
+  async captureScreenshot(options?: {
+    clip?: { x: number; y: number; width: number; height: number; scale: number }
+  }): Promise<string> {
+    if (this.isClosed) throw new Error('Target closed')
+    const res = await this.send('Page.captureScreenshot', options ?? {}) as { data?: string }
+    return res?.data ?? ''
+  }
+
   url(): string {
     return this.currentUrl
   }

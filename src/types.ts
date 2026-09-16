@@ -81,6 +81,12 @@ export interface CdpPage {
   context?(): CdpContext
   /** The main frame handle; compare with `request.frame()` for filtering. */
   mainFrame?(): unknown
+  /** Send a raw CDP command directly to the page target session. */
+  send?(method: string, params?: Record<string, unknown>): Promise<unknown>
+  /** Capture a micro-clip screenshot over CDP to trigger on-demand layout materialization in Moli. */
+  captureScreenshot?(options?: {
+    clip?: { x: number; y: number; width: number; height: number; scale: number }
+  }): Promise<string>
 }
 
 /**
