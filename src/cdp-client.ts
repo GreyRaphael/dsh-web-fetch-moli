@@ -648,9 +648,10 @@ export class NativeCdpPage implements CdpPage {
     } else if (method === 'Page.loadEventFired') {
       this.triggerLoadFired()
     } else if (method === 'Page.frameNavigated') {
-      const frame = params.frame as { id?: string; url?: string } | undefined
-      if (frame?.id === this.mainFrameId && frame.url) {
-        this.currentUrl = frame.url
+      const frame = params.frame as { id?: string; parentId?: string; url?: string } | undefined
+      if (frame && (!frame.parentId || frame.id === this.mainFrameId)) {
+        if (frame.id) this.mainFrameId = frame.id
+        if (frame.url) this.currentUrl = frame.url
       }
     } else if (method === 'Network.responseReceived') {
       const responseData = params.response as {

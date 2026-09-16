@@ -7,7 +7,7 @@ A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) plug
 ## Key Highlights
 
 - **Ultra-Lightweight Footprint** — Consumes only **~50–60 MB RAM** per local daemon, allowing high concurrency on resource-constrained servers without memory bloat.
-- **Enterprise Micro-Frontend & Dynamic SPA Compatibility** — Bypasses Content Security Policy (`Page.setBypassCSP`) and automatically triggers `IntersectionObserver` sentinels for structure-first geometry, cleanly rendering complex micro-frontend sandboxes (Alibaba Alfa, qiankun, single-spa) where other lightweight engines (Lightpanda, Obscura) fail.
+- **Enterprise Micro-Frontend & Dynamic SPA Compatibility** — Bypasses Content Security Policy (`Page.setBypassCSP`), ignores certificate errors, and bypasses Service Worker caching. Drives native Moli layout tree computation via CDP Micro-Clip layout materialization (`Page.captureScreenshot` 1x1 micro-viewport) and triggers `scrollIntoViewIfNeeded` without any user-script monkey-patching, cleanly rendering complex micro-frontends (Alibaba Alfa, qiankun, single-spa) where other lightweight engines fail.
 - **Three Flexible Backends**:
   - `local` *(default)*: Automatically manages a local `moli serve` daemon over CDP, providing full SPA and micro-frontend execution.
   - `cdp`: Connects to an existing remote Moli or Chromium CDP service over Chrome DevTools Protocol.
@@ -21,7 +21,7 @@ A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) plug
 | :--- | :--- | :--- | :--- | :--- |
 | **Memory Footprint** | ~800 MB – 1.2 GB | ~40 MB | ~50 MB | **~50 – 60 MB** |
 | **Micro-Frontend Sandbox** | ✅ Full | ❌ Crashes on iframe sandbox (`contentWindow.bind`) | ❌ Fails on dynamic `style-loader` | **✅ 100% (CDP + CSP bypass)** |
-| **Infinite Scroll / Sentinels** | ✅ Pixel layout loop | ❌ Geometry incomplete | ❌ Geometry incomplete | **✅ Automated Sentinel Hooks** |
+| **Infinite Scroll / Sentinels** | ✅ Pixel layout loop | ❌ Geometry incomplete | ❌ Geometry incomplete | **✅ Native Layout Materialization (Micro-Clip CDP)** |
 | **Daemonless Mode** | ❌ Heavy launch | ❌ | ❌ | **✅ One-shot CLI (`moli fetch`)** |
 | **Execution Protocol** | Heavy CDP | Lightweight CDP | Custom / CDP | **Dual: CDP Daemon + CLI** |
 
@@ -31,10 +31,10 @@ A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) plug
 web_fetch (tool-web)
    └─ ctx.web.fetchProvider = moli
         ├─ local: resolves moli binary → manages `moli serve` daemon → connectOverCDP
-        │           └─ setupPageHooks: Page.setBypassCSP + IntersectionObserver sentinel hook
+        │           └─ setupPageHooks: Page.setBypassCSP + ignoreCertErrors + bypassServiceWorker
         ├─ cdp:   connectOverCDP(remoteEndpoint)
         ├─ cli:   spawns `moli fetch <url> --dump html` (zero daemon)
-        ├─ page.goto → sentinel triggers → settle (networkidle) → page.content()
+        ├─ page.goto → Micro-Clip layout materialization + native scroll loop → settle (networkidle) → page.content()
         ├─ denoise: LinkeDOM (DOM) → Readability (article extract) → mdream (Markdown)
         └─ Markdown (or raw HTML when denoise is disabled)
 ```

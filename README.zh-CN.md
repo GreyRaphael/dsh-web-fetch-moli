@@ -8,8 +8,8 @@
 
 - **极致低内存占用** — 单个本地 Moli 常驻守护服务仅占用 **~50–60 MB 内存**，在资源受限的边缘节点或云服务器上亦可轻松支撑高并发抓取。
 - **企业级微前端与复杂 SPA 全面兼容** — 突破了传统轻量级无头浏览器（如 Lightpanda 在 iframe 沙箱崩溃、Obscura 在 style-loader 报错）的瓶颈：
-  - 支持 CDP 动态绕过 CSP（`Page.setBypassCSP`），彻底解决严格内容安全策略阻止动态 `import()` 的问题。
-  - 内置针对 Moli 结构优先几何（Structure-First Geometry）的 `IntersectionObserver` 哨兵自动翻转探针，完美渲染无限滚动与瀑布流卡片列表。
+  - 支持 CDP 动态绕过 CSP（`Page.setBypassCSP`）、证书忽略与 SW 穿透，彻底解决严格内容安全策略阻止动态 `import()` 的问题。
+  - 基于 CDP Micro-Clip 排版物化（`Page.captureScreenshot` 1x1 微视口）驱动 Moli 原生排版树计算，联动 `scrollIntoViewIfNeeded` 触发展开全量无限滚动与瀑布流卡片列表（零用户脚本注入、零代理劫持）。
 - **三种灵活运行模式**：
   - `local`（默认）：自动拉起受管的本地 `moli serve` CDP 守护进程，提供最完整的动态 SPA 渲染能力。
   - `cdp`：连接用户自建或远端的 Moli / Chromium CDP 服务。
@@ -23,7 +23,7 @@
 | :--- | :--- | :--- | :--- | :--- |
 | **内存占用** | ~800 MB – 1.2 GB | ~40 MB | ~50 MB | **~50 – 60 MB** |
 | **微前端沙箱兼容性** | ✅ 完整 | ❌ iframe 沙箱崩溃 (`contentWindow.bind`) | ❌ 动态 `style-loader` 样式报错 | **✅ 100% 完美支持（CDP + CSP 绕过）** |
-| **无限滚动/懒加载卡片** | ✅ 原生像素循环 | ❌ 几何模型不全 | ❌ 几何模型不全 | **✅ 自动哨兵触发钩子 (Sentinel Hook)** |
+| **无限滚动/懒加载卡片** | ✅ 原生像素循环 | ❌ 几何模型不全 | ❌ 几何模型不全 | **✅ 原生排版物化 + 滚动 (Micro-Clip CDP)** |
 | **无常驻免守护模式** | ❌ 启动开销巨大 | ❌ | ❌ | **✅ 单次极速 CLI (`moli fetch`)** |
 | **交互协议** | 重量级 CDP | 轻量级 CDP | 自定义 / CDP | **双模驱动：CDP 守护进程 + CLI** |
 
@@ -33,10 +33,10 @@
 web_fetch (tool-web)
    └─ ctx.web.fetchProvider = moli
         ├─ local: 自动定位 moli 二进制 → 启动并管理 `moli serve` 守护进程 → connectOverCDP
-        │           └─ setupPageHooks: 开启 Page.setBypassCSP + 注入 IntersectionObserver 哨兵翻转探针
+        │           └─ setupPageHooks: 开启 Page.setBypassCSP + 证书忽略 + 绕过 Service Worker
         ├─ cdp:   连接用户配置的 remoteEndpoint CDP 端口
         ├─ cli:   直接执行 `moli fetch <url> --dump html`（无常驻进程）
-        ├─ page.goto → 哨兵探针循环触发 → 等待网络空闲 (networkidle) → page.content()
+        ├─ page.goto → Micro-Clip 排版物化 + 原生滚动循环 → 等待网络空闲 (networkidle) → page.content()
         ├─ 降噪管道: LinkeDOM (DOM) → Readability (正文提取) → mdream (转 Markdown)
         └─ 输出 Markdown（关闭 denoise 时输出原始渲染 HTML）
 ```

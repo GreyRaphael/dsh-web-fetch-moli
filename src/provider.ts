@@ -496,6 +496,7 @@ export class MoliFetchProvider implements WebFetchProvider {
 
     const maxRounds = 12
     let lastCount = 0
+    let lastHtmlLen = 0
     let unchangedRounds = 0
 
     for (let round = 1; round <= maxRounds; round++) {
@@ -511,7 +512,11 @@ export class MoliFetchProvider implements WebFetchProvider {
       if (!res.scrolled) break
 
       // 3. Termination check
-      if (res.cardsCount === lastCount) {
+      const hasContentChanged = res.cardsCount > 0
+        ? res.cardsCount !== lastCount
+        : res.htmlLength > lastHtmlLen
+
+      if (!hasContentChanged) {
         unchangedRounds++
         // If there's no sentinel (list reached bottom) or unchanged for 2 rounds
         if (!res.hasSentinel || unchangedRounds >= 2) {
@@ -520,6 +525,7 @@ export class MoliFetchProvider implements WebFetchProvider {
       } else {
         unchangedRounds = 0
         lastCount = res.cardsCount
+        lastHtmlLen = res.htmlLength
       }
 
       // 4. Wait for network response and DOM render of new batch
