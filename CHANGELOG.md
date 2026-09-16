@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.10] - 2026-09-16
+
+### Fixed
+
+- **修复 Cordis 插件激活时非法访问未注入服务导致崩溃的问题**:
+  - 彻底移除 `src/index.ts` 中对未在 `inject` 声明的 `(ctx as any).tools` 的非法访问，解决 `Error: cannot get property "tools" without inject` 导致的插件激活失败（`1 entry did not activate`）。
+  - 超时完全由插件自身的 `Config.timeoutMs`（默认 60s）与 `cordis.patch.yml` 声明控制，且与传入的外部 `signal` 自动协同，遵循 Cordis 严格的服务依赖隔离契约。
+
 ## [0.3.9] - 2026-09-16
 
 ### Added
