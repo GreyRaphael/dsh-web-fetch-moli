@@ -48,7 +48,7 @@ async function sendCdp(page: CdpPage, method: string, params: Record<string, unk
  */
 export async function setupPageHooks(
   page: CdpPage,
-  options: { bypassCsp?: boolean; autoScrollSentinel?: boolean } = {},
+  options: { bypassCsp?: boolean } = {},
 ): Promise<void> {
   // 1. 开启基础协议域 (Page, Runtime, Network)
   await sendCdp(page, 'Page.enable')
@@ -87,21 +87,11 @@ export const MICRO_CLIP_VIEWPORT = { x: 0, y: 0, width: 1, height: 1, scale: 1 }
  * and transmitting 400KB+ base64 payloads over WebSocket, reducing payload to 96 bytes.
  */
 export async function forceLayoutMaterialization(page: CdpPage): Promise<void> {
-  try {
-    const clipOpts = { clip: MICRO_CLIP_VIEWPORT }
-    if (typeof page.captureScreenshot === 'function') {
-      await page.captureScreenshot(clipOpts)
-    } else if (typeof page.send === 'function') {
-      await page.send('Page.captureScreenshot', clipOpts)
-    } else {
-      const context = page.context?.()
-      if (typeof context?.newCDPSession === 'function') {
-        const cdp = await context.newCDPSession(page)
-        await cdp.send('Page.captureScreenshot', clipOpts)
-      }
-    }
-  } catch {
-    // Best-effort
+  const clipOpts = { clip: MICRO_CLIP_VIEWPORT }
+  if (typeof page.captureScreenshot === 'function') {
+    await page.captureScreenshot(clipOpts).catch(() => {})
+  } else {
+    await sendCdp(page, 'Page.captureScreenshot', clipOpts)
   }
 }
 
@@ -124,10 +114,10 @@ export async function scrollIntoViewNative(page: CdpPage): Promise<NativeScrollR
     const res = await page.evaluate(`
       (() => {
         const sentinel = document.querySelector(
-          '._loadMoreSentinel_q6822_63, [class*="sentinel" i], [class*="loadmore" i], [class*="load-more" i], [class*="infinite" i], [class*="loading" i], [id*="sentinel" i], [id*="loadmore" i]'
+          '[class*="sentinel" i], [class*="loadmore" i], [class*="load-more" i], [class*="infinite" i], [class*="loading" i], [id*="sentinel" i], [id*="loadmore" i]'
         );
         const cards = document.querySelectorAll(
-          '._grid_q6822_1 > div, [role="feed"] > *, [class*="grid" i] > *, [class*="card" i], [class*="item" i]'
+          '[role="feed"] > *, [class*="grid" i] > *, [class*="card" i], [class*="item" i]'
         );
         let target = sentinel || (cards.length > 0 ? cards[cards.length - 1] : null);
         if (!target) {
@@ -156,41 +146,4 @@ export async function scrollIntoViewNative(page: CdpPage): Promise<NativeScrollR
   } catch {
     return { cardsCount: 0, hasSentinel: false, scrolled: false, htmlLength: 0 }
   }
-}
-
-/**
- * Native trigger: materialize layout then scroll target element into view.
- * Kept for backward compatibility with previous triggerSentinels export.
- */
-export async function triggerSentinels(page: CdpPage): Promise<number> {
-  await forceLayoutMaterialization(page)
-  const res = await scrollIntoViewNative(page)
-  return res.scrolled ? (res.cardsCount || 1) : 0
-}
-
-/**
- * Backward compatibility stub: checks if sentinel element exists in DOM.
- */
-export async function getSentinelCount(page: CdpPage): Promise<number> {
-  if (typeof page.evaluate !== 'function') return 0
-  try {
-    const res = await page.evaluate(`
-      (() => {
-        const sentinel = document.querySelector(
-          '._loadMoreSentinel_q6822_63, [class*="sentinel" i], [class*="loadmore" i], [class*="load-more" i], [class*="infinite" i], [id*="sentinel" i], [id*="loadmore" i]'
-        );
-        return sentinel ? 1 : 0;
-      })()
-    `)
-    return typeof res === 'number' ? res : 0
-  } catch {
-    return 0
-  }
-}
-
-/**
- * Backward compatibility stub.
- */
-export async function getIoCount(_page: CdpPage): Promise<number> {
-  return 0
 }

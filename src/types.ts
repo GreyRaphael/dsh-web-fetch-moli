@@ -72,11 +72,6 @@ export interface CdpPage {
    * Evaluate an expression in the page.
    */
   evaluate?(script: string | ((...args: any[]) => any), arg?: unknown): Promise<unknown>
-  /**
-   * Adds a script which would be evaluated in one of the following scenarios:
-   * Whenever the page is navigated; whenever the child frame is attached.
-   */
-  addInitScript?(script: string | { content: string }): Promise<void>
   /** Context reference. */
   context?(): CdpContext
   /** The main frame handle; compare with `request.frame()` for filtering. */

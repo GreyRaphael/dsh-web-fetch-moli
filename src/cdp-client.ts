@@ -596,11 +596,6 @@ export class NativeCdpPage implements CdpPage {
     return res?.result?.value
   }
 
-  async addInitScript(script: string): Promise<void> {
-    if (this.isClosed) throw new Error('Target closed')
-    await this.send('Page.addScriptToEvaluateOnNewDocument', { source: script })
-  }
-
   async route(glob: string, handler: (route: CdpRoute) => Promise<void>): Promise<void> {
     const pattern = globToRegExp(glob)
     await this.addRoute(pattern, handler)

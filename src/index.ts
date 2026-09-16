@@ -38,7 +38,6 @@ export {
   scrollIntoViewNative,
   setBypassCsp,
   setupPageHooks,
-  triggerSentinels,
 } from './hooks.ts'
 export type { NativeScrollResult } from './hooks.ts'
 export { resolveCdpBackend, resolveMoliBinary, findOnPath } from './moli-resolve.ts'

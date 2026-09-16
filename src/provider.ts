@@ -309,7 +309,6 @@ export class MoliFetchProvider implements WebFetchProvider {
       const lease = await this.cdpPool.acquire(endpoint, timeout, effectiveContextMode(config))
       await setupPageHooks(lease.page, {
         bypassCsp: config.bypassCsp,
-        autoScrollSentinel: config.autoScrollSentinel,
       })
       guardPopups(lease.page)
       return {
@@ -437,8 +436,8 @@ export class MoliFetchProvider implements WebFetchProvider {
             if (hasSpinner) return true;
 
             const root = document.querySelector('#root, #app, [id*="root"]');
-            const cards = document.querySelectorAll('._grid_q6822_1 > div, [class*="card"], [class*="item"], [class*="model"], [role="feed"] > *').length;
-            const sentinel = Boolean(document.querySelector('._loadMoreSentinel_q6822_63, [class*="sentinel" i], [class*="loadmore" i], [class*="load-more" i], [class*="infinite" i]'));
+            const cards = document.querySelectorAll('[role="feed"] > *, [class*="grid" i] > *, [class*="card" i], [class*="item" i], [class*="model" i]').length;
+            const sentinel = Boolean(document.querySelector('[class*="sentinel" i], [class*="loadmore" i], [class*="load-more" i], [class*="infinite" i]'));
 
             // Settled if cards or sentinels have mounted into DOM
             if (cards >= 5 || sentinel) return false;
@@ -491,10 +490,10 @@ export class MoliFetchProvider implements WebFetchProvider {
     const skipScroll = await page.evaluate(`
       (() => {
         const hasSentinel = Boolean(document.querySelector(
-          '._loadMoreSentinel_q6822_63, [class*="sentinel" i], [class*="loadmore" i], [class*="load-more" i], [class*="infinite" i], [class*="loading" i], [id*="sentinel" i], [id*="loadmore" i]'
+          '[class*="sentinel" i], [class*="loadmore" i], [class*="load-more" i], [class*="infinite" i], [class*="loading" i], [id*="sentinel" i], [id*="loadmore" i]'
         ));
         if (hasSentinel) return false;
-        const hasGridOrFeed = Boolean(document.querySelector('._grid_q6822_1, [role="feed"]'));
+        const hasGridOrFeed = Boolean(document.querySelector('[role="feed"], [class*="grid" i]'));
         if (hasGridOrFeed) return false;
         const textLen = (document.body?.innerText || document.body?.textContent || '').trim().length;
         const hasDocArticle = Boolean(document.querySelector('article, .markdown-body, .docs-content, table'));
