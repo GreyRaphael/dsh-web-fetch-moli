@@ -1,7 +1,7 @@
 /**
  * Native CDP and layout hooks for Moli:
  * 1. Content Security Policy (CSP) bypass over CDP for micro-frontend sandboxes (Page.setBypassCSP).
- * 2. On-demand layout materialization (Page.captureScreenshot) and scrollIntoViewIfNeeded.
+ * 2. On-demand layout materialization (Page.captureScreenshot) and W3C standard scrollIntoView.
  *
  * Fully zero-user-script: no Monkey-Patching, no IntersectionObserver hijacking,
  * and no client-side proxy required.
@@ -113,9 +113,10 @@ export interface NativeScrollResult {
 }
 
 /**
- * Execute native scrollIntoViewIfNeeded on infinite scroll sentinels or trailing cards.
+ * Execute native W3C standard scrollIntoView({ block: 'nearest', inline: 'nearest' })
+ * on infinite scroll sentinels or trailing cards.
  */
-export async function scrollIntoViewIfNeededNative(page: CdpPage): Promise<NativeScrollResult> {
+export async function scrollIntoViewNative(page: CdpPage): Promise<NativeScrollResult> {
   if (typeof page.evaluate !== 'function') {
     return { cardsCount: 0, hasSentinel: false, scrolled: false, htmlLength: 0 }
   }
@@ -136,11 +137,8 @@ export async function scrollIntoViewIfNeededNative(page: CdpPage): Promise<Nativ
           }
         }
         let scrolled = false;
-        if (target && typeof target.scrollIntoViewIfNeeded === 'function') {
-          target.scrollIntoViewIfNeeded();
-          scrolled = true;
-        } else if (target && typeof target.scrollIntoView === 'function') {
-          target.scrollIntoView({ block: 'end' });
+        if (target && typeof target.scrollIntoView === 'function') {
+          target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
           scrolled = true;
         }
         return {
@@ -166,7 +164,7 @@ export async function scrollIntoViewIfNeededNative(page: CdpPage): Promise<Nativ
  */
 export async function triggerSentinels(page: CdpPage): Promise<number> {
   await forceLayoutMaterialization(page)
-  const res = await scrollIntoViewIfNeededNative(page)
+  const res = await scrollIntoViewNative(page)
   return res.scrolled ? (res.cardsCount || 1) : 0
 }
 

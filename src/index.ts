@@ -35,7 +35,7 @@ export { runMoliFetch } from './cli-runner.ts'
 export {
   forceLayoutMaterialization,
   MICRO_CLIP_VIEWPORT,
-  scrollIntoViewIfNeededNative,
+  scrollIntoViewNative,
   setBypassCsp,
   setupPageHooks,
   triggerSentinels,

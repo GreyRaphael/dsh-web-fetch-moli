@@ -9,7 +9,7 @@
 - **极致低内存占用** — 单个本地 Moli 常驻守护服务仅占用 **~50–60 MB 内存**，在资源受限的边缘节点或云服务器上亦可轻松支撑高并发抓取。
 - **企业级微前端与复杂 SPA 全面兼容** — 突破了传统轻量级无头浏览器（如 Lightpanda 在 iframe 沙箱崩溃、Obscura 在 style-loader 报错）的瓶颈：
   - 支持 CDP 动态绕过 CSP（`Page.setBypassCSP`）、证书忽略与 SW 穿透，彻底解决严格内容安全策略阻止动态 `import()` 的问题。
-  - 基于 CDP Micro-Clip 排版物化（`Page.captureScreenshot` 1x1 微视口）驱动 Moli 原生排版树计算，联动 `scrollIntoViewIfNeeded` 触发展开全量无限滚动与瀑布流卡片列表（零用户脚本注入、零代理劫持）。
+  - 基于 CDP Micro-Clip 排版物化（`Page.captureScreenshot` 1x1 微视口）驱动 Moli 原生排版树计算，联动 W3C 标准 `scrollIntoView({ block: 'nearest' })` 触发展开全量无限滚动与瀑布流卡片列表（零用户脚本注入、零代理劫持）。
 - **三种灵活运行模式**：
   - `local`（默认）：自动拉起受管的本地 `moli serve` CDP 守护进程，提供最完整的动态 SPA 渲染能力。
   - `cdp`：连接用户自建或远端的 Moli / Chromium CDP 服务。

@@ -7,7 +7,7 @@ A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) plug
 ## Key Highlights
 
 - **Ultra-Lightweight Footprint** — Consumes only **~50–60 MB RAM** per local daemon, allowing high concurrency on resource-constrained servers without memory bloat.
-- **Enterprise Micro-Frontend & Dynamic SPA Compatibility** — Bypasses Content Security Policy (`Page.setBypassCSP`), ignores certificate errors, and bypasses Service Worker caching. Drives native Moli layout tree computation via CDP Micro-Clip layout materialization (`Page.captureScreenshot` 1x1 micro-viewport) and triggers `scrollIntoViewIfNeeded` without any user-script monkey-patching, cleanly rendering complex micro-frontends (Alibaba Alfa, qiankun, single-spa) where other lightweight engines fail.
+- **Enterprise Micro-Frontend & Dynamic SPA Compatibility** — Bypasses Content Security Policy (`Page.setBypassCSP`), ignores certificate errors, and bypasses Service Worker caching. Drives native Moli layout tree computation via CDP Micro-Clip layout materialization (`Page.captureScreenshot` 1x1 micro-viewport) and triggers W3C standard `scrollIntoView({ block: 'nearest' })` without any user-script monkey-patching, cleanly rendering complex micro-frontends (Alibaba Alfa, qiankun, single-spa) where other lightweight engines fail.
 - **Three Flexible Backends**:
   - `local` *(default)*: Automatically manages a local `moli serve` daemon over CDP, providing full SPA and micro-frontend execution.
   - `cdp`: Connects to an existing remote Moli or Chromium CDP service over Chrome DevTools Protocol.

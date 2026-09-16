@@ -19,7 +19,7 @@ import { DEFAULT_MAX_CONCURRENCY_CDP, DEFAULT_MAX_CONCURRENCY_CLI, DEFAULT_MAX_C
 import type { ResolvedConfig } from './config.ts'
 import { CdpConnectionPool } from './cdp-pool.ts'
 import type { CdpConnect, CdpLease } from './cdp-pool.ts'
-import { forceLayoutMaterialization, scrollIntoViewIfNeededNative, setupPageHooks } from './hooks.ts'
+import { forceLayoutMaterialization, scrollIntoViewNative, setupPageHooks } from './hooks.ts'
 import { htmlToMarkdown } from './markdown.ts'
 import { MoliProcessManager } from './moli-process.ts'
 import { resolveCdpBackend, resolveMoliBinary } from './moli-resolve.ts'
@@ -481,7 +481,7 @@ export class MoliFetchProvider implements WebFetchProvider {
 
   /**
    * Native scroll rounds for dynamic SPA / infinite lists via Moli layout materialization
-   * and scrollIntoViewIfNeeded (moli_scroll scheme).
+   * and W3C standard scrollIntoView (moli_scroll scheme).
    */
   private async runSentinelRounds(page: CdpPage, deadline: Deadline): Promise<void> {
     if (typeof page.evaluate !== 'function') return
@@ -514,8 +514,8 @@ export class MoliFetchProvider implements WebFetchProvider {
       // 1. Force layout materialization so Moli computes physical bounding boxes
       await forceLayoutMaterialization(page)
 
-      // 2. Perform native scrollIntoViewIfNeeded on sentinel or trailing card
-      const res = await scrollIntoViewIfNeededNative(page)
+      // 2. Perform native scrollIntoView on sentinel or trailing card
+      const res = await scrollIntoViewNative(page)
 
       // If nothing was scrolled, this page has no scrollable target
       if (!res.scrolled) break

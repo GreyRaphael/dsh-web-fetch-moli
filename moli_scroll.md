@@ -1,4 +1,4 @@
-# Moli 无注入滚动方案：`Page.setBypassCSP` 与 `scrollIntoViewIfNeeded` (Micro-Clip) 协同实践
+# Moli 无注入滚动方案：`Page.setBypassCSP` 与 W3C 标准 `scrollIntoView` (Micro-Clip) 协同实践
 
 ## 1. 概述与背景
 
@@ -9,7 +9,7 @@
 2. **无限滚动难以原生触发，以往依赖不可靠的脚本注入**：
    列表数据分批次加载（首屏 30-57 个，全量 206+ 个），依赖列表底部的哨兵 DOM 节点配合 `IntersectionObserver` 动态触发。以往常见的做法是向页面强行注入用户脚本（如 Monkey Patch 劫持 `window.IntersectionObserver`），这种方案与特定网站的内部实现强耦合、缺乏泛化能力，极易随前端工程重构而失效。
 
-本文档记录了一种**完全零 User Script 注入、零外部代理介入**的高性能原生自动化方案：**利用 Moli 原生 CDP 指令 `Page.setBypassCSP` 绕过安全阻碍，并结合“微裁剪排版物化（Micro-Clip Layout Materialization）”与 Moli 内置的 `HTMLElement.prototype.scrollIntoViewIfNeeded`，稳定、极速地拉取到全量卡片**。
+本文档记录了一种**完全零 User Script 注入、零外部代理介入**的高性能原生自动化方案：**利用 Moli 原生 CDP 指令 `Page.setBypassCSP` 绕过安全阻碍，并结合“微裁剪排版物化（Micro-Clip Layout Materialization）”与 Moli 内置的 W3C 标准 `HTMLElement.prototype.scrollIntoView({ block: 'nearest' })`，稳定、极速地拉取到全量卡片**。
 
 ---
 
@@ -36,17 +36,17 @@
 
 ---
 
-### 2.2 突破二：微裁剪排版物化（Micro-Clip Layout Materialization）+ `scrollIntoViewIfNeeded` 联动
+### 2.2 突破二：微裁剪排版物化（Micro-Clip Layout Materialization）+ `scrollIntoView({ block: 'nearest' })` 原生滚动联动
 
-Moli 在 DOM 节点上原生提供了标准 WebKit 行为的 `HTMLElement.prototype.scrollIntoViewIfNeeded` 方法。但在实践中，如果在页面加载后直接执行该方法，卡片数量仍会卡在首屏，其根本原因在于 **Moli 的“按需排版（On-demand Layout）”机制**。
+Moli 在 DOM 节点上原生完整支持了 W3C 标准的 `HTMLElement.prototype.scrollIntoView({ block: 'nearest', inline: 'nearest' })`。其底层 Rust 几何求值由 `scroll_axis_to_expose` 驱动，具备标准规范的跨引擎与跨浏览器通用性。但在实践中，如果在页面加载后直接执行滚动，卡片数量仍会卡在首屏，其根本原因在于 **Moli 的“按需排版（On-demand Layout）”机制**。
 
-#### 为什么直接调用 `scrollIntoViewIfNeeded` 会失效？
+#### 为什么直接调用滚动会失效？
 - Moli 启动参数 `-l` (`--layout`) 开启的是一个**惰性按需排版引擎**。为了追求极致渲染速度与超低内存，在没有显式排版指令（如截图、测量计算）时，DOM 节点的物理几何坐标（BoundingRect）保持未计算状态：
   ```json
   // 未物化时的 getBoundingClientRect()
   { "top": 0, "bottom": 0, "left": 0, "right": 0, "width": 0, "height": 0 }
   ```
-- 当 `scrollIntoViewIfNeeded(false)` 执行时，它会判断目标元素是否处于视口（Viewport）内。由于此时坐标为 `(0, 0)`，处于视口范围（`1920x1080`）之内，引擎判定 **`ifNeeded = false`（无需滚动）**，因此不会触发任何容器位移，`IntersectionObserver` 也不会被激活。
+- 当 `scrollIntoView({ block: 'nearest' })` 执行时，它会判断目标元素是否处于视口（Viewport）内。由于此时坐标为 `(0, 0)`，处于视口范围（`1920x1080`）之内，引擎判定目标已在视口范围内（无需位移），因此不会触发任何容器位移，`IntersectionObserver` 也不会被激活。
 
 #### 解决方案：微裁剪排版物化（Micro-Clip Layout Materialization）两步联动流
 
@@ -60,7 +60,7 @@ Moli 在 DOM 节点上原生提供了标准 WebKit 行为的 `HTMLElement.protot
 flowchart TD
     A[每轮滚动开始] --> B["CDP: Page.captureScreenshot (Micro-Clip 1x1 像素)"]
     B --> C["节点几何坐标生效：Sentinel Top 变为 3186px，回包仅 96 字节"]
-    C --> D["JS: sentinel.scrollIntoViewIfNeeded()"]
+    C --> D["JS: sentinel.scrollIntoView({ block: 'nearest' })"]
     D --> E["目标坐标在视口外，引擎精确驱动滚动容器触底"]
     E --> F["IntersectionObserver 触发交叉事件"]
     F --> G["React 发起下一页 API 请求，卡片数追加 +60"]
@@ -75,13 +75,13 @@ flowchart TD
    {
      "method": "Page.captureScreenshot",
      "params": {
-       "clip": { "x": 0, "y": 0, "width": 1, "height": 1, "scale": 1 }
+       "clip": { "x": 0, "y": 0, "width": 1, "height": 1, scale: 1 }
      }
    }
    ```
    - 实测物化后坐标：哨兵节点的 Y 坐标由 `(top: 0, y: 0)` 立即变为真实的 `top: 3186px`（远在首屏 1080px 之外）。
 2. **执行按需滚动**：
-   此时调用 `sentinel.scrollIntoViewIfNeeded()`，Moli 判定其在视口之外，沿 DOM 树向上查找第一个具备 `overflow: auto/scroll` 的容器（即 `div._main_20ll6_7`），计算偏移量并执行合法的容器滚动。
+   此时调用 `sentinel.scrollIntoView({ block: 'nearest', inline: 'nearest' })`，Moli 判定其在视口之外，沿 DOM 树向上查找第一个具备 `overflow: auto/scroll` 的容器（即 `div._main_20ll6_7`），计算偏移量并执行合法的容器滚动。
 3. **原生触发异步流**：
    容器滚动后，Moli 的渲染流水线成功派发原生的 `IntersectionObserver` 交叉事件，React 内部状态更新，发起网络请求并追加新卡片。
 
@@ -97,12 +97,12 @@ flowchart TD
 3. 派发 Page.setBypassCSP 指令: {"enabled": true} -> 成功响应 {}
 4. 导航至百炼模型广场，等待首屏微前端水合 (3.4s 就绪)...
    -> 首屏状态: DOM 字符数 830,000+, 首屏卡片数 36
-5. 启动 Micro-Clip 排版物化 + scrollIntoViewIfNeeded 滚动循环:
-   Round 1: { cardsCount: 36,  hasSentinel: false, action: 'card_scrollIntoViewIfNeeded' }
-   Round 2: { cardsCount: 57,  hasSentinel: true,  action: 'sentinel_scrollIntoViewIfNeeded' }
-   Round 3: { cardsCount: 117, hasSentinel: true,  action: 'sentinel_scrollIntoViewIfNeeded' }
-   Round 4: { cardsCount: 177, hasSentinel: true,  action: 'sentinel_scrollIntoViewIfNeeded' }
-   Round 5: { cardsCount: 206, hasSentinel: false, action: 'card_scrollIntoViewIfNeeded' }
+5. 启动 Micro-Clip 排版物化 + scrollIntoView({ block: 'nearest' }) 滚动循环:
+   Round 1: { cardsCount: 36,  hasSentinel: false, action: 'card_scrollIntoView' }
+   Round 2: { cardsCount: 57,  hasSentinel: true,  action: 'sentinel_scrollIntoView' }
+   Round 3: { cardsCount: 117, hasSentinel: true,  action: 'sentinel_scrollIntoView' }
+   Round 4: { cardsCount: 177, hasSentinel: true,  action: 'sentinel_scrollIntoView' }
+   Round 5: { cardsCount: 206, hasSentinel: false, action: 'card_scrollIntoView' }
    Round 6: { cardsCount: 206, hasSentinel: false, action: 'completed' }
 
 🎉 成功达成: 稳定拉取全量 206+ 个模型卡片，生成 58,740 字符的高质量 Markdown！
@@ -217,7 +217,7 @@ async function run() {
             }
         }
 
-        // 6. Micro-Clip 排版物化与 scrollIntoViewIfNeeded 循环滚动
+        // 6. Micro-Clip 排版物化与 scrollIntoView({ block: 'nearest' }) 循环滚动
         console.log('[5/5] 开始 Micro-Clip 排版物化滚动循环...');
         let lastCount = 0;
         let unchangedRounds = 0;
@@ -228,15 +228,15 @@ async function run() {
                 clip: { x: 0, y: 0, width: 1, height: 1, scale: 1 }
             });
 
-            // 调用目标元素的 scrollIntoViewIfNeeded
+            // 调用目标元素的 W3C 标准 scrollIntoView
             const res = await cdp('Runtime.evaluate', {
                 expression: `(() => {
                     const sentinel = document.querySelector('._loadMoreSentinel_q6822_63, [class*="sentinel" i], [class*="load-more" i]');
                     const cards = document.querySelectorAll('._grid_q6822_1 > div, [class*="card"], [class*="item"]');
                     let target = sentinel || (cards.length > 0 ? cards[cards.length - 1] : null);
                     let scrolled = false;
-                    if (target && typeof target.scrollIntoViewIfNeeded === 'function') {
-                        target.scrollIntoViewIfNeeded();
+                    if (target && typeof target.scrollIntoView === 'function') {
+                        target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
                         scrolled = true;
                     }
                     return {
@@ -292,7 +292,7 @@ run().catch(console.error);
 ## 5. 常见问题排查与注意事项
 
 1. **为什么必须加 `-l` (`--layout`) 启动参数？**
-   Moli 默认处于无头极速模式（不构建完整的渲染表面与排版几何）。`-l` 参数开启了内部的真实排版器，只有在该模式下，`Page.captureScreenshot` 才能协同物化盒模型坐标，进而让 `scrollIntoViewIfNeeded` 正确探测到元素与视口的距离差。
+   Moli 默认处于无头极速模式（不构建完整的渲染表面与排版几何）。`-l` 参数开启了内部的真实排版器，只有在该模式下，`Page.captureScreenshot` 才能协同物化盒模型坐标，进而让 `scrollIntoView` 正确探测到元素与视口的距离差。
 2. **为什么推荐 Micro-Clip (`clip: 1x1`) 且无需指定任何 format？**
    全视口截图会花费大量 CPU 去光栅化 1080p 图像并编码几十万字节的图片 base64 数据。通过仅传入 `clip: { x: 0, y: 0, width: 1, height: 1, scale: 1 }`（无需传入 `png`、`jpeg` 等格式参数），CDP 同样会完整执行 Layout Pass（物化所有元素的物理盒模型坐标），但仅光栅化 1 个像素，响应体积骤降到 96 字节，既大幅降低 CPU 开销与网络延迟，又完全解除了对任何具体图像编码格式的依赖。
 3. **针对其他 SPA 页面的通用选择器建议**：
@@ -300,7 +300,7 @@ run().catch(console.error);
    ```javascript
    const target = document.querySelector('[class*="sentinel" i], [class*="loadmore" i], [class*="load-more" i], [class*="infinite" i], [class*="loading" i]') 
                || document.querySelector('[role="feed"] > :last-child, [class*="grid" i] > :last-child, main > :last-child');
-   if (target && typeof target.scrollIntoViewIfNeeded === 'function') {
-       target.scrollIntoViewIfNeeded();
+   if (target && typeof target.scrollIntoView === 'function') {
+       target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
    }
    ```
