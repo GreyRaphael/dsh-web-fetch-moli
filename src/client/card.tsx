@@ -210,6 +210,19 @@ export function MoliCard(props: MoliCardProps) {
         onReset={() => { props.resetField('denoise') }}
       />
       <ValueField
+        id="plugin-config-moli-timeout"
+        label={t('timeoutMs')}
+        hint={t('timeoutMsHint')}
+        placeholder={t('timeoutMsPlaceholder')}
+        overriddenLabel={t('overridden')}
+        resetLabel={t('reset')}
+        invalidLabel={t('invalidText')}
+        disabled={disabled}
+        {...state.timeoutMs}
+        onEdit={(text) => { props.edit('timeoutMs', text) }}
+        onReset={() => { props.resetField('timeoutMs') }}
+      />
+      <ValueField
         id="plugin-config-moli-concurrency"
         label={t('maxConcurrency')}
         hint={t('maxConcurrencyHint')}

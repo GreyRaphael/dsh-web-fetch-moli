@@ -15,7 +15,7 @@ import { WebError } from '@deepseek-ai/dsh-web'
 import type { WebFetchProvider, WebFetchRequest, WebFetchResult } from '@deepseek-ai/dsh-web'
 import { CHALLENGE_DOM_PROBE, CHALLENGE_FINISH_RESERVE_MS, CHALLENGE_POLL_INTERVAL_MS, classifyChallengeHtml, classifyChallengeResponse, isChallengeCompatibleResponse } from './challenge.ts'
 import type { ChallengeVerdict } from './challenge.ts'
-import { DEFAULT_MAX_CONCURRENCY_CDP, DEFAULT_MAX_CONCURRENCY_CLI, DEFAULT_MAX_CONCURRENCY_LOCAL, effectiveChallengeRetries, effectiveChallengeWaitMs, effectiveContextMode, effectiveMaxConcurrency, normalizeCdpEndpoint } from './config.ts'
+import { DEFAULT_MAX_CONCURRENCY_CDP, DEFAULT_MAX_CONCURRENCY_CLI, DEFAULT_MAX_CONCURRENCY_LOCAL, DEFAULT_TIMEOUT_MS, effectiveChallengeRetries, effectiveChallengeWaitMs, effectiveContextMode, effectiveMaxConcurrency, effectiveTimeoutMs, normalizeCdpEndpoint } from './config.ts'
 import type { ResolvedConfig } from './config.ts'
 import { CdpConnectionPool } from './cdp-pool.ts'
 import type { CdpConnect, CdpLease } from './cdp-pool.ts'
@@ -43,9 +43,6 @@ const MAX_PIPELINE_INPUT_CHARS = 2_000_000
 
 /** How long a fetch may sit in the concurrency queue before failing fast. */
 const QUEUE_TIMEOUT_MS = 20_000
-
-/** Default per-fetch budget (ms) - strictly below harness 30s tool timeout. */
-const DEFAULT_TIMEOUT_MS = 25_000
 
 /** Post-DOM settle wait (ms) so dynamic micro-frontend modules settle. */
 const SETTLE_MS = 500
@@ -232,7 +229,8 @@ export class MoliFetchProvider implements WebFetchProvider {
     if (signal?.aborted) throw new WebError('web fetch aborted', 'WEB_ABORTED')
     const config = this.configSource()
     const url = validateFetchUrl(request.url)
-    const deadline = new Deadline(signal, DEFAULT_TIMEOUT_MS)
+    const timeoutBudget = effectiveTimeoutMs(config)
+    const deadline = new Deadline(signal, timeoutBudget)
 
     // CLI mode execution
     if (config.backend === 'cli') {

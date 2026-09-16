@@ -20,6 +20,7 @@ export interface MoliSettings {
   bypassCsp?: boolean
   autoScrollSentinel?: boolean
   denoise?: boolean
+  timeoutMs?: number
   maxConcurrency?: number
   challengeWaitMs?: number
 }
@@ -33,6 +34,7 @@ export interface MoliCardState extends CardShell {
   bypassCsp: CardFieldState
   autoScrollSentinel: CardFieldState
   denoise: CardFieldState
+  timeoutMs: CardFieldState
   maxConcurrency: CardFieldState
   challengeWaitMs: CardFieldState
 }
@@ -60,6 +62,7 @@ export class MoliCardController {
         checkboxField('bypassCsp'),
         checkboxField('autoScrollSentinel'),
         checkboxField('denoise'),
+        numberField('timeoutMs', 1000, 300_000),
         numberField('maxConcurrency', 1, 200),
         numberField('challengeWaitMs', 0, 60_000),
       ],
@@ -77,6 +80,7 @@ export class MoliCardController {
       bypassCsp: this.form.field('bypassCsp'),
       autoScrollSentinel: this.form.field('autoScrollSentinel'),
       denoise: this.form.field('denoise'),
+      timeoutMs: this.form.field('timeoutMs'),
       maxConcurrency: this.form.field('maxConcurrency'),
       challengeWaitMs: this.form.field('challengeWaitMs'),
     }

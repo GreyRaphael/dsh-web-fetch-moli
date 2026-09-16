@@ -43,6 +43,15 @@ export const DEFAULT_CHALLENGE_RETRIES = 1
 /** Ceiling the schema accepts for `challengeRetries`. */
 export const MAX_CHALLENGE_RETRIES = 3
 
+/**
+ * Default per-fetch timeout budget (ms).
+ * Aligns with `tool-web`'s `fetchTimeoutMs` (60,000ms).
+ */
+export const DEFAULT_TIMEOUT_MS = 60_000
+
+/** Ceiling the schema accepts for `timeoutMs` (5 minutes). */
+export const MAX_TIMEOUT_MS = 300_000
+
 export type { CdpContextMode, MoliBackend } from './types.ts'
 
 /** Plugin config: everything optional — the schema fills the defaults. */
@@ -84,6 +93,11 @@ export interface Config {
    */
   challengeRetries?: number
   /**
+   * Total deadline budget (ms) for a single fetch operation.
+   * Aligns with `tool-web`'s `fetchTimeoutMs` (default: 60,000ms).
+   */
+  timeoutMs?: number
+  /**
    * How many fetches may render at once.
    * Blank = backend default (20 for local, 50 for remote CDP, 8 for CLI).
    */
@@ -98,6 +112,7 @@ export const Config: z<Config> = z.object({
   bypassCsp: z.boolean().default(true),
   autoScrollSentinel: z.boolean().default(true),
   denoise: z.boolean().default(true),
+  timeoutMs: z.number().step(1000).min(1000).max(MAX_TIMEOUT_MS).default(DEFAULT_TIMEOUT_MS),
   maxConcurrency: z.number().step(1).min(1).max(MAX_CONCURRENCY_CEILING),
   challengeWaitMs: z.number().step(100).min(0).max(MAX_CHALLENGE_WAIT_MS).default(DEFAULT_CHALLENGE_WAIT_MS),
   challengeRetries: z.number().step(1).min(0).max(MAX_CHALLENGE_RETRIES).default(DEFAULT_CHALLENGE_RETRIES),
@@ -106,7 +121,18 @@ export const Config: z<Config> = z.object({
 /**
  * Complete config after schemastery applies the field defaults it owns.
  */
-export type ResolvedConfig = Omit<Required<Config>, 'maxConcurrency'> & { maxConcurrency?: number }
+export type ResolvedConfig = Omit<Required<Config>, 'maxConcurrency' | 'timeoutMs'> & {
+  maxConcurrency?: number
+  timeoutMs?: number
+}
+
+/**
+ * The effective timeout budget (ms) for a fetch operation.
+ */
+export function effectiveTimeoutMs(config: Pick<Config, 'timeoutMs'>): number {
+  if (typeof config.timeoutMs === 'number' && config.timeoutMs > 0) return config.timeoutMs
+  return DEFAULT_TIMEOUT_MS
+}
 
 /**
  * The concurrency limit a fetch actually runs with.

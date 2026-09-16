@@ -8,7 +8,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-settings'
 import type {} from '@deepseek-ai/dsh-web'
-import { Config } from './config.ts'
+import { Config, DEFAULT_TIMEOUT_MS } from './config.ts'
 import type { ResolvedConfig } from './config.ts'
 import { MoliFetchProvider } from './provider.ts'
 import { resolveMoliBinary } from './moli-resolve.ts'
@@ -21,10 +21,13 @@ export {
   DEFAULT_MAX_CONCURRENCY_CDP,
   DEFAULT_MAX_CONCURRENCY_CLI,
   DEFAULT_MAX_CONCURRENCY_LOCAL,
+  DEFAULT_TIMEOUT_MS,
+  MAX_TIMEOUT_MS,
   effectiveChallengeRetries,
   effectiveChallengeWaitMs,
   effectiveContextMode,
   effectiveMaxConcurrency,
+  effectiveTimeoutMs,
   normalizeCdpEndpoint,
 } from './config.ts'
 export type { Config as MoliFetchConfig, CdpContextMode, MoliBackend, ResolvedConfig } from './config.ts'
@@ -84,7 +87,14 @@ export function apply(ctx: Context, config: Config): void {
     })
   })
 
-  const provider = new MoliFetchProvider(() => current())
+  const provider = new MoliFetchProvider(() => {
+    const cfg = current()
+    const toolTimeout = (ctx as any).tools?.get('web_fetch')?.timeoutMs
+    if (typeof toolTimeout === 'number' && toolTimeout > 0 && (!cfg.timeoutMs || cfg.timeoutMs === DEFAULT_TIMEOUT_MS)) {
+      return { ...cfg, timeoutMs: toolTimeout }
+    }
+    return cfg
+  })
   ctx.effect(() => () => { void provider.dispose() }, 'dsh-web-fetch-moli: cleanup daemon and CDP')
   ctx.web.registerFetchProvider(provider)
 

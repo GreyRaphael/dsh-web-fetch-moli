@@ -10,13 +10,16 @@ import {
   DEFAULT_MAX_CONCURRENCY_CDP,
   DEFAULT_MAX_CONCURRENCY_CLI,
   DEFAULT_MAX_CONCURRENCY_LOCAL,
+  DEFAULT_TIMEOUT_MS,
   MAX_CHALLENGE_RETRIES,
   MAX_CHALLENGE_WAIT_MS,
   MAX_CONCURRENCY_CEILING,
+  MAX_TIMEOUT_MS,
   effectiveChallengeRetries,
   effectiveChallengeWaitMs,
   effectiveContextMode,
   effectiveMaxConcurrency,
+  effectiveTimeoutMs,
   normalizeCdpEndpoint,
 } from '../src/config.ts'
 
@@ -31,6 +34,7 @@ describe('Config', () => {
       bypassCsp: true,
       autoScrollSentinel: true,
       denoise: true,
+      timeoutMs: DEFAULT_TIMEOUT_MS,
       challengeWaitMs: DEFAULT_CHALLENGE_WAIT_MS,
       challengeRetries: DEFAULT_CHALLENGE_RETRIES,
     })
@@ -44,6 +48,7 @@ describe('Config', () => {
       bypassCsp: false,
       autoScrollSentinel: false,
       denoise: false,
+      timeoutMs: 45_000,
       maxConcurrency: 50,
       challengeWaitMs: 30_000,
       challengeRetries: 2,
@@ -56,6 +61,7 @@ describe('Config', () => {
       bypassCsp: false,
       autoScrollSentinel: false,
       denoise: false,
+      timeoutMs: 45_000,
       maxConcurrency: 50,
       challengeWaitMs: 30_000,
       challengeRetries: 2,
@@ -79,6 +85,23 @@ describe('Config', () => {
     expect(Config({ challengeRetries: MAX_CHALLENGE_RETRIES }).challengeRetries).toBe(MAX_CHALLENGE_RETRIES)
     expect(() => Config({ challengeRetries: -1 })).toThrow()
     expect(() => Config({ challengeRetries: MAX_CHALLENGE_RETRIES + 1 })).toThrow()
+  })
+
+  it('accepts timeoutMs across valid range and rejects outside it', () => {
+    expect(Config({ timeoutMs: 1000 }).timeoutMs).toBe(1000)
+    expect(Config({ timeoutMs: 60_000 }).timeoutMs).toBe(60_000)
+    expect(Config({ timeoutMs: MAX_TIMEOUT_MS }).timeoutMs).toBe(MAX_TIMEOUT_MS)
+    expect(() => Config({ timeoutMs: 0 })).toThrow()
+    expect(() => Config({ timeoutMs: -1000 })).toThrow()
+    expect(() => Config({ timeoutMs: MAX_TIMEOUT_MS + 1000 })).toThrow()
+  })
+})
+
+describe('effectiveTimeoutMs', () => {
+  it('returns configured timeoutMs when provided, falls back to DEFAULT_TIMEOUT_MS', () => {
+    expect(effectiveTimeoutMs({ timeoutMs: 30_000 })).toBe(30_000)
+    expect(effectiveTimeoutMs({ timeoutMs: 120_000 })).toBe(120_000)
+    expect(effectiveTimeoutMs({})).toBe(DEFAULT_TIMEOUT_MS)
   })
 })
 

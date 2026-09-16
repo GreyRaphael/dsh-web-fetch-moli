@@ -418,6 +418,12 @@ describe('MoliFetchProvider', () => {
     const result = await new FakeProvider({}, { networkIdleError: true }).fetch({ url: 'https://example.com/spa' })
     expect(result.body.kind).toBe('text')
   })
+
+  it('aborts with WEB_FETCH_TIMEOUT when configured timeoutMs expires', async () => {
+    const slowProvider = new FakeProvider({ timeoutMs: 50 }, { hangGoto: true })
+    const code = await codeOf(slowProvider.fetch({ url: 'https://example.com/slow' }))
+    expect(code).toBe('WEB_FETCH_TIMEOUT')
+  })
 })
 
 describe('MoliFetchProvider concurrency queue', () => {

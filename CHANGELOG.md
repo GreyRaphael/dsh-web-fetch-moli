@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-09-16
+
+### Added
+
+- **深度对齐 DSH `fetchTimeoutMs` (60s) 超时预算**:
+  - 在 `Config` 中新增 `timeoutMs` 配置字段，并将抓取全局兜底预算从写死的 25s 提升至 60,000ms（与 `cordis.patch.yml` 中 `tool-web` 的 60s 预算完全对齐）。
+  - 运行时动态感知 `ctx.tools.get('web_fetch')?.timeoutMs`，实现与上层 DSH 工具守卫预算的双向智能自动同步。
+  - 前端 UI 设置卡片与中英本地化字典全面增加 `timeoutMs` 配置支持。
+
+### Changed
+
+- **重构预导航与安全 CDP 指令管道**:
+  - 严格仅保留 6 项有实际业务改变意义的非默认 CDP 配置（`Page/Runtime/Network.enable`、`Page.setBypassCSP`、`Security.setIgnoreCertificateErrors`、`Network.setBypassServiceWorker`）。
+  - 省略 Moli 原生出厂自带的 1080P 桌面视口与 `navigator.webdriver=false`，规避旧版 Moli 报错 `UnknownMethod`。
+  - `setBypassCSP` 动态透传前端配置的布尔值，杜绝连接池复用时的状态遗留。
+- **Micro-Clip 物化与 W3C 标准滚动机制**:
+  - 彻底废除 UserScript 猴子补丁，采用极简 1x1 Micro-Clip 截图促发 Moli 布局树物化，结合 W3C 原生 `scrollIntoView` 机制稳定加载 179+ 瀑布流卡片。
+- **Moli 内核升级**:
+  - 插件升级时自动检测并从 GitHub Releases 同步最新版 Moli 二进制。
+
 ## [0.3.2] - 2026-09-14
 
 ### Fixed

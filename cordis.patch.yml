@@ -34,3 +34,5 @@
 - insert:
     - id: web-fetch-moli
       name: dsh-web-fetch-moli
+      config:
+        timeoutMs: 60000
