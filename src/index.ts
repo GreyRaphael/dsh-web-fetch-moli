@@ -77,9 +77,10 @@ export const WEB_FETCH_MOLI_SETTINGS_NAMESPACE = 'web-fetch-moli'
 
 /** Register the Moli fetch provider with `ctx.web`. */
 export function apply(ctx: Context, config: Config): void {
-  let current: () => ResolvedConfig = () => config as ResolvedConfig
+  const resolvedBase = Config(config ?? {}) as ResolvedConfig
+  let current: () => ResolvedConfig = () => resolvedBase
   ctx.inject(['settings'], (settingsCtx) => {
-    settingsCtx.settings.installSection(ctx, WEB_FETCH_MOLI_SETTINGS_NAMESPACE, Config, config, {
+    settingsCtx.settings.installSection(ctx, WEB_FETCH_MOLI_SETTINGS_NAMESPACE, Config, resolvedBase, {
       setSource: (source) => {
         current = source as () => ResolvedConfig
       },

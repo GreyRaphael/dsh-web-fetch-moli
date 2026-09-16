@@ -15,7 +15,20 @@ import { WebError } from '@deepseek-ai/dsh-web'
 import type { WebFetchProvider, WebFetchRequest, WebFetchResult } from '@deepseek-ai/dsh-web'
 import { CHALLENGE_DOM_PROBE, CHALLENGE_FINISH_RESERVE_MS, CHALLENGE_POLL_INTERVAL_MS, classifyChallengeHtml, classifyChallengeResponse, isChallengeCompatibleResponse } from './challenge.ts'
 import type { ChallengeVerdict } from './challenge.ts'
-import { DEFAULT_MAX_CONCURRENCY_CDP, DEFAULT_MAX_CONCURRENCY_CLI, DEFAULT_MAX_CONCURRENCY_LOCAL, DEFAULT_TIMEOUT_MS, effectiveChallengeRetries, effectiveChallengeWaitMs, effectiveContextMode, effectiveMaxConcurrency, effectiveTimeoutMs, normalizeCdpEndpoint } from './config.ts'
+import {
+  DEFAULT_CHALLENGE_RETRIES,
+  DEFAULT_CHALLENGE_WAIT_MS,
+  DEFAULT_MAX_CONCURRENCY_CDP,
+  DEFAULT_MAX_CONCURRENCY_CLI,
+  DEFAULT_MAX_CONCURRENCY_LOCAL,
+  DEFAULT_TIMEOUT_MS,
+  effectiveChallengeRetries,
+  effectiveChallengeWaitMs,
+  effectiveContextMode,
+  effectiveMaxConcurrency,
+  effectiveTimeoutMs,
+  normalizeCdpEndpoint,
+} from './config.ts'
 import type { ResolvedConfig } from './config.ts'
 import { CdpConnectionPool } from './cdp-pool.ts'
 import type { CdpConnect, CdpLease } from './cdp-pool.ts'
@@ -193,6 +206,22 @@ function classifyContentType(header: string | undefined): DecodableKind | undefi
   return undefined
 }
 
+function withDefaults(config: ResolvedConfig | undefined): ResolvedConfig {
+  return {
+    backend: config?.backend ?? 'local',
+    moliPath: config?.moliPath ?? '',
+    cdpEndpoint: config?.cdpEndpoint ?? '',
+    shareBrowserContext: config?.shareBrowserContext !== false,
+    bypassCsp: config?.bypassCsp !== false,
+    autoScrollSentinel: config?.autoScrollSentinel !== false,
+    denoise: config?.denoise !== false,
+    timeoutMs: config?.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    challengeWaitMs: config?.challengeWaitMs ?? DEFAULT_CHALLENGE_WAIT_MS,
+    challengeRetries: config?.challengeRetries ?? DEFAULT_CHALLENGE_RETRIES,
+    maxConcurrency: config?.maxConcurrency,
+  }
+}
+
 export class MoliFetchProvider implements WebFetchProvider {
   readonly id = MOLI_FETCH_PROVIDER_ID
 
@@ -209,8 +238,8 @@ export class MoliFetchProvider implements WebFetchProvider {
     configSource: () => ResolvedConfig,
     cdpPoolOrConnect: CdpConnectionPool | CdpConnect = defaultCdpConnect,
   ) {
-    this.configSource = configSource
-    const initial = configSource()
+    this.configSource = () => withDefaults(configSource())
+    const initial = this.configSource()
     this.semaphore = new Semaphore(effectiveMaxConcurrency(initial))
     this.cdpPool = cdpPoolOrConnect instanceof CdpConnectionPool
       ? cdpPoolOrConnect
@@ -274,7 +303,7 @@ export class MoliFetchProvider implements WebFetchProvider {
         signal: deadline.signal,
       })
 
-      if (!config.denoise) {
+      if (config.denoise === false) {
         return capResult(url.toString(), cliResult.statusCode, { kind: 'html', content: cliResult.content })
       }
 
@@ -402,7 +431,7 @@ export class MoliFetchProvider implements WebFetchProvider {
     await page.waitForLoadState?.('networkidle', { timeout: Math.min(SETTLE_MS, deadline.remainingMs()) }).catch(() => {})
 
     const html = await page.content()
-    if (!config.denoise) {
+    if (config.denoise === false) {
       return capResult(finalUrl, statusCode, { kind: 'html', content: html })
     }
     const bounded = html.length > MAX_PIPELINE_INPUT_CHARS ? html.slice(0, MAX_PIPELINE_INPUT_CHARS) : html
@@ -418,7 +447,7 @@ export class MoliFetchProvider implements WebFetchProvider {
    */
   private async settleDynamicSpa(page: CdpPage, deadline: Deadline): Promise<void> {
     if (typeof page.evaluate !== 'function') return
-    const maxWaitMs = Math.min(15_000, deadline.remainingMs() - 8_000)
+    const maxWaitMs = Math.min(25_000, Math.max(10_000, deadline.remainingMs() - 15_000))
     if (maxWaitMs <= 0) return
     const start = Date.now()
 
@@ -430,15 +459,15 @@ export class MoliFetchProvider implements WebFetchProvider {
             const body = document.body;
             if (!body) return true;
 
-            const hasSpinner = Boolean(document.querySelector('.ant-spin, .anticon-spin, [class*="spin"], [class*="skeleton"], [class*="loading"]'));
-            if (hasSpinner) return true;
-
             const root = document.querySelector('#root, #app, [id*="root"]');
             const cards = document.querySelectorAll('[role="feed"] > *, [class*="grid" i] > *, [class*="card" i], [class*="item" i], [class*="model" i]').length;
             const sentinel = Boolean(document.querySelector('[class*="sentinel" i], [class*="loadmore" i], [class*="load-more" i], [class*="infinite" i]'));
 
             // Settled if cards or sentinels have mounted into DOM
             if (cards >= 5 || sentinel) return false;
+
+            const hasSpinner = Boolean(document.querySelector('.ant-spin, .anticon-spin, [class*="spin"], [class*="skeleton"], [class*="loading"]'));
+            if (hasSpinner) return true;
 
             // In SPA root containers (#root, #app), require root-internal content rather than outer navbars
             if (root) {
@@ -529,8 +558,8 @@ export class MoliFetchProvider implements WebFetchProvider {
 
       if (!hasContentChanged) {
         unchangedRounds++
-        // If there's no sentinel (list reached bottom) or unchanged for 2 rounds
-        if (!res.hasSentinel || unchangedRounds >= 2) {
+        // Stop if content stopped growing for 2 consecutive rounds
+        if (unchangedRounds >= 2) {
           break
         }
       } else {
@@ -545,8 +574,8 @@ export class MoliFetchProvider implements WebFetchProvider {
         }
       }
 
-      // 4. Wait for network response and DOM render of new batch (优化为 1000ms)
-      await sleep(Math.min(1000, Math.max(200, deadline.remainingMs() - 4000)))
+      // 4. Wait for network response and DOM render of new batch
+      await sleep(Math.min(1200, Math.max(300, deadline.remainingMs() - 4000)))
     }
   }
 

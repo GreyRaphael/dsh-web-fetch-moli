@@ -45,9 +45,9 @@ export const MAX_CHALLENGE_RETRIES = 3
 
 /**
  * Default per-fetch timeout budget (ms).
- * Aligns with `tool-web`'s `fetchTimeoutMs` (60,000ms).
+ * Provides generous headroom for complex micro-frontends and multi-round infinite scrolling (90,000ms).
  */
-export const DEFAULT_TIMEOUT_MS = 60_000
+export const DEFAULT_TIMEOUT_MS = 90_000
 
 /** Ceiling the schema accepts for `timeoutMs` (5 minutes). */
 export const MAX_TIMEOUT_MS = 300_000

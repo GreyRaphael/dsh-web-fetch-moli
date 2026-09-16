@@ -7,7 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.3.11] - 2026-09-16
+## [0.3.12] - 2026-09-16
+
+### Fixed
+
+- **修复弱网/慢速环境下微前端与复杂 SPA 瀑布流卡片提前中断与未去噪问题**:
+  - **建议 1 修复（动态渲染与无限滚动）**:
+    - 优化 `settleDynamicSpa`：延长骨架屏/加载动画等待上限至 `Math.min(25_000, ...)`，且当卡片或 Sentinel 已挂载到 DOM 时优先判定已就绪，避免因页面常驻的微弱 `.ant-spin` 类误判未就绪导致超时退出。
+    - 修复 `runSentinelRounds` 误触底提早退出：移除 `(res.cardsCount > 0 && !res.hasSentinel)` 的过早中断逻辑，严格要求 `unchangedRounds >= 2` 才判定停止增长；同时保留此前已见 Sentinel 后的 `everHadSentinel && !res.hasSentinel` 触底快速收敛机制，防止首轮尚未挂载 Sentinel 时直接中断。
+    - 优化单轮等待节奏至 1200ms，为弱网环境下的下一批数据请求保留充裕的网络往返与 DOM 挂载时间。
+  - **建议 2 修复（配置容错与默认兜底）**:
+    - 在 `src/index.ts` 的 `apply` 中对外部传入的 `config` 默认通过 `Config(config ?? {})` 注入 schema 完整默认值；在 `MoliFetchProvider` 内部增设 `withDefaults` 深度兜底。
+    - 修复判断条件从 `!config.denoise` 改为严格的 `config.denoise === false`，彻底消除未配置时回退为未去噪原始 HTML 并在 100,000 字符处被截断的问题。
+    - 将 `DEFAULT_TIMEOUT_MS` 提升至 90s，为多达 10 轮排版物化与网络加载的重型微前端页面（如阿里云百炼 179 张卡片）提供充裕的端到端执行预算。
+
 
 ### Fixed
 
