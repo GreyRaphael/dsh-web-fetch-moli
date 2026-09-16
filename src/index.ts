@@ -40,7 +40,15 @@ export {
   setupPageHooks,
 } from './hooks.ts'
 export type { NativeScrollResult } from './hooks.ts'
-export { resolveCdpBackend, resolveMoliBinary, findOnPath } from './moli-resolve.ts'
+export {
+  fetchLatestMoliReleaseTag,
+  findOnPath,
+  getLocalMoliVersion,
+  getPluginPackageVersion,
+  resolveCdpBackend,
+  resolveMoliBinary,
+  syncLatestMoliOnPluginUpdate,
+} from './moli-resolve.ts'
 export {
   CHALLENGE_DOM_PROBE,
   CHALLENGE_FINISH_RESERVE_MS,

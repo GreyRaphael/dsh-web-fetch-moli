@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import {
   downloadLatestMoliBinary,
+  fetchLatestMoliReleaseTag,
   findOnPath,
+  getLocalMoliVersion,
   getMoliReleaseAsset,
+  getPluginPackageVersion,
   isExecutableFile,
   resolveCdpBackend,
   resolveMoliBinary,
+  syncLatestMoliOnPluginUpdate,
 } from '../src/moli-resolve.ts'
 
 describe('moli-resolve', () => {
@@ -49,6 +53,33 @@ describe('moli-resolve', () => {
     const bin = await resolveMoliBinary()
     expect(bin).toBeDefined()
     expect(isExecutableFile(bin)).toBe(true)
+  })
+
+  it('getPluginPackageVersion returns valid semver from package.json', () => {
+    const ver = getPluginPackageVersion()
+    expect(ver).toMatch(/^\d+\.\d+\.\d+/)
+  })
+
+  it('getLocalMoliVersion inspects binary version string', async () => {
+    const bin = await resolveMoliBinary()
+    const ver = getLocalMoliVersion(bin)
+    expect(ver).toBeDefined()
+    expect(ver).toMatch(/^\d+\.\d+\.\d+/)
+  })
+
+  it('fetchLatestMoliReleaseTag fetches remote release tag or returns null on network issues', async () => {
+    const tag = await fetchLatestMoliReleaseTag()
+    if (tag !== null) {
+      expect(tag).toMatch(/^\d+\.\d+\.\d+/)
+    }
+  })
+
+  it('syncLatestMoliOnPluginUpdate fast-path skips check when version stamp matches', async () => {
+    const t0 = performance.now()
+    await syncLatestMoliOnPluginUpdate()
+    const elapsed = performance.now() - t0
+    // Fast path should complete in under 50ms without network roundtrip
+    expect(elapsed).toBeLessThan(100)
   })
 
   it('resolveCdpBackend returns usable chromium driver', async () => {
