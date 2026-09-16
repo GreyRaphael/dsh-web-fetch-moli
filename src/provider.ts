@@ -503,6 +503,7 @@ export class MoliFetchProvider implements WebFetchProvider {
     if (skipScroll) return
 
     const maxRounds = 12
+    let everHadSentinel = false
     let lastCount = 0
     let lastHtmlLen = 0
     let unchangedRounds = 0
@@ -519,6 +520,10 @@ export class MoliFetchProvider implements WebFetchProvider {
       // If nothing was scrolled, this page has no scrollable target
       if (!res.scrolled) break
 
+      if (res.hasSentinel) {
+        everHadSentinel = true
+      }
+
       // 3. Termination check
       const hasContentChanged = res.cardsCount > 0
         ? res.cardsCount !== lastCount
@@ -534,10 +539,16 @@ export class MoliFetchProvider implements WebFetchProvider {
         unchangedRounds = 0
         lastCount = res.cardsCount
         lastHtmlLen = res.htmlLength
+
+        // 优化：识别 Sentinel 销毁（此前曾有 Sentinel，现 hasSentinel === false）且卡片已有增量，
+        // 说明触底全量加载完毕，直接快速收敛退出，消除尾部的无效空转轮次
+        if (everHadSentinel && !res.hasSentinel) {
+          break
+        }
       }
 
-      // 4. Wait for network response and DOM render of new batch
-      await sleep(Math.min(1500, Math.max(200, deadline.remainingMs() - 4000)))
+      // 4. Wait for network response and DOM render of new batch (优化为 1000ms)
+      await sleep(Math.min(1000, Math.max(200, deadline.remainingMs() - 4000)))
     }
   }
 
