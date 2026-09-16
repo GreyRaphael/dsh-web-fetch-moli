@@ -25,4 +25,33 @@ describe('dsh-web-fetch-moli Cordis integration', () => {
     expect(provider.id).toBe('moli')
     expect(provider.available()).toBe(true)
   })
+
+  it('dynamically aligns web_fetch tool timeout with moli budget on tools/execute', async () => {
+    const ctx = new Context()
+    await ctx.plugin(WebRuntime, { fetchProvider: 'moli' })
+
+    const toolDef: { name: string; timeoutMs?: number } = { name: 'web_fetch', timeoutMs: 30000 }
+    const toolsService = {
+      get: (name: string, _agent?: unknown) => {
+        if (name === 'web_fetch') return toolDef
+        return undefined
+      },
+    }
+    ctx.provide('tools', toolsService)
+
+    apply(ctx, { backend: 'cdp', timeoutMs: 60000 } as unknown as Config)
+    await Promise.resolve()
+
+    expect(toolDef.timeoutMs).toBe(30000)
+
+    let executed = false
+    await (ctx as any).waterfall('tools/execute', { name: 'web_fetch' }, async () => {
+      executed = true
+      return { status: 200 }
+    })
+
+    expect(executed).toBe(true)
+    expect(toolDef.timeoutMs).toBe(60000)
+  })
 })
+

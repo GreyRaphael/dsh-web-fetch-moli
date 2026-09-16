@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.11] - 2026-09-16
+
+### Fixed
+
+- **自动穿透与对齐 Preset 预设作用域的 `web_fetch` 超时预算**:
+  - 针对 DSH Web 模式下 Agent Preset（如 `standard` 预设）漏设 `fetchTimeoutMs` 导致 `web_fetch` 被局部作用域 30s 默认值遮蔽（shadowing）的问题，通过 Cordis `ctx.inject(['tools'])` 安全挂载 `tools/execute` 前置流水线钩子（`prepend: true`）。
+  - 在每次分发 `web_fetch` 前，动态把当前会话/预设作用域中的 `tool.timeoutMs` 提升并对齐至 Moli 的实际配置预算（默认 60s），确保上层 `@deepseek-ai/dsh-tool-call-timeout-policy` 守卫自动采用 60s 倒计时，彻底告别 `Error: tool call timed out after 30000ms`。
+  - 遵循 Cordis 严格的服务依赖隔离规范，零破坏性，无需用户修改 DSH 源码或自定义 Preset。
+
 ## [0.3.10] - 2026-09-16
 
 ### Fixed

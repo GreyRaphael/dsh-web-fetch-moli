@@ -8,7 +8,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-settings'
 import type {} from '@deepseek-ai/dsh-web'
-import { Config } from './config.ts'
+import { Config, effectiveTimeoutMs } from './config.ts'
 import type { ResolvedConfig } from './config.ts'
 import { MoliFetchProvider } from './provider.ts'
 import { resolveMoliBinary } from './moli-resolve.ts'
@@ -85,6 +85,20 @@ export function apply(ctx: Context, config: Config): void {
       },
       onChange: () => {},
     })
+  })
+
+  // Hook into tools/execute to dynamically align session/preset-scoped web_fetch.timeoutMs with Moli's configured budget
+  ctx.inject(['tools'], (toolsCtx) => {
+    (toolsCtx as any).on('tools/execute', (exec: any, next: () => Promise<unknown>) => {
+      if (exec.name === 'web_fetch') {
+        const tool = (toolsCtx as any).tools.get('web_fetch', exec.agent)
+        const budget = effectiveTimeoutMs(current())
+        if (tool && (typeof tool.timeoutMs !== 'number' || tool.timeoutMs < budget)) {
+          tool.timeoutMs = budget
+        }
+      }
+      return next()
+    }, { prepend: true })
   })
 
   const provider = new MoliFetchProvider(() => current())
