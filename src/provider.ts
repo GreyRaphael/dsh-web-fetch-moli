@@ -261,32 +261,35 @@ export class MoliFetchProvider implements WebFetchProvider {
     const timeoutBudget = effectiveTimeoutMs(config)
     const deadline = new Deadline(signal, timeoutBudget)
 
-    // CLI mode execution
-    if (config.backend === 'cli') {
-      return await this.fetchViaCli(url, config, deadline)
-    }
+    // Unified single concurrency gatekeeper across all backends (cdp, local, cli)
+    this.semaphore.resize(effectiveMaxConcurrency(config))
+    await this.semaphore.acquire(deadline.signal, Math.min(QUEUE_TIMEOUT_MS, deadline.remainingMs()))
+    let acquired = true
 
-    // CDP mode execution (local daemon or remote endpoint)
-    let session: MoliBrowserSession | undefined
-    let acquired = false
     try {
-      this.semaphore.resize(effectiveMaxConcurrency(config))
-      await this.semaphore.acquire(deadline.signal, QUEUE_TIMEOUT_MS)
-      acquired = true
-      session = await this.openSession(config, deadline)
+      if (config.backend === 'cli') {
+        return await this.fetchViaCli(url, config, deadline)
+      }
 
-      const held = session
-      const onAbort = () => { void closeSession(held, this.cdpPool) }
-      deadline.signal.addEventListener('abort', onAbort, { once: true })
+      // CDP mode execution (local daemon or remote endpoint)
+      let session: MoliBrowserSession | undefined
       try {
-        return await this.retrieve(session, url, config, deadline)
+        session = await this.openSession(config, deadline)
+
+        const held = session
+        const onAbort = () => { void closeSession(held, this.cdpPool) }
+        deadline.signal.addEventListener('abort', onAbort, { once: true })
+        try {
+          return await this.retrieve(session, url, config, deadline)
+        } finally {
+          deadline.signal.removeEventListener('abort', onAbort)
+        }
       } finally {
-        deadline.signal.removeEventListener('abort', onAbort)
+        await closeSession(session, this.cdpPool)
       }
     } catch (error: unknown) {
       throw translateError(error, deadline)
     } finally {
-      await closeSession(session, this.cdpPool)
       if (acquired) this.semaphore.release()
     }
   }
@@ -327,9 +330,9 @@ export class MoliFetchProvider implements WebFetchProvider {
     if (config.backend === 'cdp') {
       endpoint = normalizeCdpEndpoint(config.cdpEndpoint)
     } else {
-      // Local managed Moli serve daemon
+      // Local managed Moli serve daemon (aligned with active concurrency capacity)
       const moliBin = await resolveMoliBinary(config.moliPath)
-      endpoint = await this.moliProcess.ensure(moliBin)
+      endpoint = await this.moliProcess.ensure(moliBin, effectiveMaxConcurrency(config))
     }
 
     try {

@@ -57,7 +57,7 @@ export class MoliProcessManager {
    * @param moliPath - executable binary path.
    * @returns CDP endpoint URL (e.g. `http://127.0.0.1:9222`).
    */
-  async ensure(moliPath: string): Promise<string> {
+  async ensure(moliPath: string, maxConcurrency?: number): Promise<string> {
     if (this.child && this.endpoint) {
       const isLive = await checkCdpEndpointHealthy(this.endpoint, 500)
       if (isLive) return this.endpoint
@@ -73,7 +73,13 @@ export class MoliProcessManager {
         const endpoint = `http://127.0.0.1:${port}`
         this.stderrBuffer = []
 
-        const child = spawn(moliPath, ['serve', '--host', '127.0.0.1', '--port', String(port), '--layout', '--resource'], {
+        const args = ['serve', '--host', '127.0.0.1', '--port', String(port), '--layout', '--resource']
+        if (typeof maxConcurrency === 'number' && maxConcurrency > 0) {
+          args.push('--http-max-concurrent', String(maxConcurrency))
+          args.push('--http-max-host-connections', String(maxConcurrency))
+        }
+
+        const child = spawn(moliPath, args, {
           stdio: ['ignore', 'pipe', 'pipe'],
           detached: false,
         })
