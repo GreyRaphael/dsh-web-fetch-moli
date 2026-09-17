@@ -8,7 +8,6 @@ import {
   DEFAULT_CHALLENGE_RETRIES,
   DEFAULT_CHALLENGE_WAIT_MS,
   DEFAULT_MAX_CONCURRENCY_CDP,
-  DEFAULT_MAX_CONCURRENCY_CLI,
   DEFAULT_MAX_CONCURRENCY_LOCAL,
   DEFAULT_TIMEOUT_MS,
   MAX_CHALLENGE_RETRIES,
@@ -120,18 +119,15 @@ describe('effective challenge knobs', () => {
 })
 
 describe('effectiveMaxConcurrency', () => {
-  it('defaults per backend: local Moli, remote CDP, and CLI', () => {
+  it('defaults per backend: local Moli and remote CDP', () => {
     expect(effectiveMaxConcurrency({ backend: 'local' })).toBe(DEFAULT_MAX_CONCURRENCY_LOCAL)
     expect(effectiveMaxConcurrency({ backend: 'cdp' })).toBe(DEFAULT_MAX_CONCURRENCY_CDP)
-    expect(effectiveMaxConcurrency({ backend: 'cli' })).toBe(DEFAULT_MAX_CONCURRENCY_CLI)
     expect(DEFAULT_MAX_CONCURRENCY_CDP).toBeGreaterThan(DEFAULT_MAX_CONCURRENCY_LOCAL)
-    expect(DEFAULT_MAX_CONCURRENCY_LOCAL).toBeGreaterThan(DEFAULT_MAX_CONCURRENCY_CLI)
   })
 
   it('an explicit setting wins over all backend defaults', () => {
     expect(effectiveMaxConcurrency({ backend: 'local', maxConcurrency: 50 })).toBe(50)
     expect(effectiveMaxConcurrency({ backend: 'cdp', maxConcurrency: 2 })).toBe(2)
-    expect(effectiveMaxConcurrency({ backend: 'cli', maxConcurrency: 15 })).toBe(15)
   })
 })
 

@@ -8,10 +8,9 @@ A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) plug
 
 - **Ultra-Lightweight Footprint** — Consumes only **~50–60 MB RAM** per local daemon, allowing high concurrency on resource-constrained servers without memory bloat.
 - **Enterprise Micro-Frontend & Dynamic SPA Compatibility** — Bypasses Content Security Policy (`Page.setBypassCSP`), ignores certificate errors, and bypasses Service Worker caching. Drives native Moli layout tree computation via CDP Micro-Clip layout materialization (`Page.captureScreenshot` 1x1 micro-viewport) and triggers W3C standard `scrollIntoView({ block: 'nearest' })` without any user-script monkey-patching, cleanly rendering complex micro-frontends (Alibaba Alfa, qiankun, single-spa) where other lightweight engines fail.
-- **Three Flexible Backends**:
-  - `local` *(default)*: Automatically manages a local `moli serve` daemon over CDP, providing full SPA and micro-frontend execution.
+- **Two Flexible Backends**:
+  - `local` *(default)*: Automatically manages a local `moli serve` daemon over CDP, providing full SPA and micro-frontend execution with ~60MB memory footprint.
   - `cdp`: Connects to an existing remote Moli or Chromium CDP service over Chrome DevTools Protocol.
-  - `cli`: Directly executes one-shot `moli fetch`, zero background daemon, ultra-fast cold start.
 - **High-Performance Two-Stage Denoise Pipeline** — LinkeDOM + Mozilla Readability extracts primary content and eliminates noise (ads, nav bars, footers, forms), followed by mdream (Rust native with pure JS fallback) for high-fidelity, LLM-optimized Markdown conversion. Inline base64 images are elided to compact size placeholders.
 - **Cloudflare Challenge Resilience** — Detects `cf-mitigated: challenge` interstitials and waits in the same page/context for natural clearance without artificial bot behavior.
 
@@ -22,8 +21,7 @@ A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) plug
 | **Memory Footprint** | ~800 MB – 1.2 GB | ~40 MB | ~50 MB | **~50 – 60 MB** |
 | **Micro-Frontend Sandbox** | ✅ Full | ❌ Crashes on iframe sandbox (`contentWindow.bind`) | ❌ Fails on dynamic `style-loader` | **✅ 100% (CDP + CSP bypass)** |
 | **Infinite Scroll / Sentinels** | ✅ Pixel layout loop | ❌ Geometry incomplete | ❌ Geometry incomplete | **✅ Native Layout Materialization (Micro-Clip CDP)** |
-| **Daemonless Mode** | ❌ Heavy launch | ❌ | ❌ | **✅ One-shot CLI (`moli fetch`)** |
-| **Execution Protocol** | Heavy CDP | Lightweight CDP | Custom / CDP | **Dual: CDP Daemon + CLI** |
+| **Execution Protocol** | Heavy CDP | Lightweight CDP | Custom / CDP | **Lightweight Native CDP** |
 
 ## How it works
 
@@ -33,7 +31,6 @@ web_fetch (tool-web)
         ├─ local: resolves moli binary → manages `moli serve` daemon → connectOverCDP
         │           └─ setupPageHooks: Page.setBypassCSP + ignoreCertErrors + bypassServiceWorker
         ├─ cdp:   connectOverCDP(remoteEndpoint)
-        ├─ cli:   spawns `moli fetch <url> --dump html` (zero daemon)
         ├─ page.goto → Micro-Clip layout materialization + native scroll loop → settle (networkidle) → page.content()
         ├─ denoise: LinkeDOM (DOM) → Readability (article extract) → mdream (Markdown)
         └─ Markdown (or raw HTML when denoise is disabled)
@@ -69,14 +66,14 @@ The settings card (设置 → 插件 → 插件配置 → *Moli 网页爬取*) c
 
 | Field | Default | Description |
 | --- | --- | --- |
-| `backend` | `local` | `local` (managed Moli CDP daemon), `cdp` (remote CDP endpoint), or `cli` (one-shot CLI). |
+| `backend` | `local` | `local` (managed Moli CDP daemon) or `cdp` (remote CDP endpoint). |
 | `moliPath` | *(auto)* | Path to `moli` binary. Blank = auto-discover on `$PATH` and standard locations. |
-| `cdpEndpoint` | `127.0.0.1:9222` | Remote CDP endpoint (`host:port` or URL). |
+| `cdpEndpoint` | `127.0.0.1:9222` | Remote CDP endpoint (`host:port` or URL, used in `cdp` mode). |
 | `bypassCsp` | `true` | Bypasses Content Security Policy via CDP `Page.setBypassCSP`, unlocking micro-frontend dynamic script loading. |
 | `autoScrollSentinel` | `true` | Programmatically triggers `IntersectionObserver` load-more sentinels for structure-first geometry. |
-| `shareBrowserContext` | `true` | Preserves cookies and localStorage across fetches. Unchecked: fresh isolated context per fetch. |
+| `shareBrowserContext` | `true` | Preserves cookies and localStorage across fetches in `cdp` mode. Unchecked (and always in `local` mode): fresh isolated context per fetch. |
 | `denoise` | `true` | Runs LinkeDOM + Readability + mdream to strip ads, navbars, and footers before LLM-optimized Markdown conversion. |
-| `maxConcurrency` | *(auto)* | Max concurrent rendering slots (auto: local 20, remote CDP 50, CLI 8). |
+| `maxConcurrency` | *(auto)* | Max concurrent rendering slots (auto: local 20, remote CDP 50). |
 | `challengeWaitMs` | `15000` | Bounded wait (ms) for Cloudflare verification to clear naturally. |
 | `challengeRetries` | `1` | Same-page retry attempts after challenge wait. |
 

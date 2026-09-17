@@ -7,7 +7,7 @@
 /** Locale keys this card renders. */
 export type MoliCardLocaleKey =
   | 'title' | 'description'
-  | 'backendLabel' | 'backendLocal' | 'backendLocalHint' | 'backendCdp' | 'backendCdpHint' | 'backendCli' | 'backendCliHint'
+  | 'backendLabel' | 'backendLocal' | 'backendLocalHint' | 'backendCdp' | 'backendCdpHint'
   | 'moliPath' | 'moliPathHint' | 'moliPathPlaceholder'
   | 'cdpEndpoint' | 'cdpEndpointHint'
   | 'bypassCsp' | 'bypassCspHint'
@@ -30,14 +30,12 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 /** English copy. */
 export const en: Record<MoliCardLocaleKey, string> = {
   title: 'Moli web fetch',
-  description: 'Ultra-lightweight web-fetch provider using Moli (Rust headless browser, ~60MB RAM). Supports local daemon, one-shot CLI, and remote CDP.',
+  description: 'Ultra-lightweight web-fetch provider using Moli (Rust headless browser, ~60MB RAM). Supports local managed daemon and remote CDP.',
   backendLabel: 'Backend mode',
   backendLocal: 'Local Moli daemon',
   backendLocalHint: 'Spawns a managed local moli serve process over CDP with micro-frontend and CSP bypass support (~60MB RAM).',
   backendCdp: 'Remote CDP endpoint',
   backendCdpHint: 'Connect to an existing Moli or Chromium CDP service over DevTools Protocol.',
-  backendCli: 'One-shot CLI',
-  backendCliHint: 'Executes moli fetch directly per request without running a background daemon.',
   moliPath: 'Moli executable path',
   moliPathHint: 'Leave blank to auto-discover moli on $PATH or standard directories.',
   moliPathPlaceholder: '(auto: moli from $PATH)',
@@ -76,14 +74,12 @@ export const en: Record<MoliCardLocaleKey, string> = {
 /** Simplified Chinese copy. */
 export const zh: Record<MoliCardLocaleKey, string> = {
   title: 'Moli 网页爬取',
-  description: '基于 Moli（超轻量 Rust 无头浏览器，仅约 60MB 内存）的网页抓取插件。支持本地服务、单次 CLI 及远程 CDP。',
+  description: '基于 Moli（超轻量 Rust 无头浏览器，仅约 60MB 内存）的网页抓取插件。支持受管本地服务及远程 CDP 集群。',
   backendLabel: '后端运行模式',
   backendLocal: '本地 Moli 服务',
   backendLocalHint: '在本地启动受管的 moli serve 服务并通过 CDP 通信，支持微前端沙箱与 CSP 绕过，内存占用仅约 60MB。',
   backendCdp: '远端 CDP 地址',
   backendCdpHint: '连接至已在运行的 Moli 或 Chromium CDP 端口。',
-  backendCli: '单次 CLI 命令',
-  backendCliHint: '每次请求直接执行 moli fetch 命令行，无需后台常驻进程。',
   moliPath: 'Moli 可执行文件路径',
   moliPathHint: '留空则按系统 $PATH 或默认目录查找 moli。',
   moliPathPlaceholder: '（自动：按 $PATH 查找 moli）',

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **彻底移除 `cli`（单次命令行）模式，统一收敛为原生轻量 CDP 驱动**:
+  - 移除了 `src/cli-runner.ts` 及所有相关的单次命令行进程启动与解析逻辑。
+  - `MoliBackend` 运行模式严格收敛为 `'local' | 'cdp'`；`maxConcurrency` 的 CLI 默认并发配置也一并清理。
+  - 重构前端 WebUI 配置面板：移除 `cli` 单选，并将仅在 `cdp` 模式下生效的 `shareBrowserContext` 配置下沉内嵌至 `cdp` 模式设置块中，消除“配置项在 local 下无效却暴露在全局”的体验混淆。
+  - 精简相关测试套件，13 个测试文件共 134 项测试全部通过。
+
 ## [0.3.12] - 2026-09-16
 
 ### Fixed

@@ -19,7 +19,6 @@ export {
   DEFAULT_CHALLENGE_RETRIES,
   DEFAULT_CHALLENGE_WAIT_MS,
   DEFAULT_MAX_CONCURRENCY_CDP,
-  DEFAULT_MAX_CONCURRENCY_CLI,
   DEFAULT_MAX_CONCURRENCY_LOCAL,
   DEFAULT_TIMEOUT_MS,
   MAX_TIMEOUT_MS,
@@ -34,7 +33,6 @@ export type { Config as MoliFetchConfig, CdpContextMode, MoliBackend, ResolvedCo
 export { CdpConnectionPool } from './cdp-pool.ts'
 export type { CdpAcquireMode, CdpConnect, CdpLease } from './cdp-pool.ts'
 export { MoliProcessManager, getFreePort, checkCdpEndpointHealthy } from './moli-process.ts'
-export { runMoliFetch } from './cli-runner.ts'
 export {
   forceLayoutMaterialization,
   MICRO_CLIP_VIEWPORT,

@@ -135,53 +135,7 @@ afterAll(async () => {
   await new Promise<void>(resolve => { server.close(() => { resolve() }) })
 })
 
-describe('MoliFetchProvider CLI integration', () => {
-  it('fetches a local page via one-shot CLI and denoises it', { timeout: 30_000 }, async () => {
-    if (!moliAvailable) return
 
-    const provider = new MoliFetchProvider(() => ({
-      backend: 'cli',
-      moliPath,
-      cdpEndpoint: '',
-      shareBrowserContext: true,
-      bypassCsp: true,
-      autoScrollSentinel: true,
-      denoise: true,
-      maxConcurrency: 4,
-      challengeWaitMs: 0,
-      challengeRetries: 0,
-    }))
-    const result = await provider.fetch({ url: baseUrl })
-    expect(result.statusCode).toBe(200)
-    expect(result.url).toBe(baseUrl)
-    expect(result.body.kind).toBe('text')
-    const content = result.body.kind === 'text' ? result.body.content : ''
-    expect(content).toMatch(/^# (Smoke page|Smoke heading)\b/m)
-    expect(content).toContain('The rendered body text.')
-    expect(content).not.toContain('nav link')
-    expect(content).not.toContain('footer noise')
-  })
-
-  it('returns raw html via CLI with denoise off', { timeout: 30_000 }, async () => {
-    if (!moliAvailable) return
-
-    const provider = new MoliFetchProvider(() => ({
-      backend: 'cli',
-      moliPath,
-      cdpEndpoint: '',
-      shareBrowserContext: true,
-      bypassCsp: true,
-      autoScrollSentinel: true,
-      denoise: false,
-      maxConcurrency: 4,
-      challengeWaitMs: 0,
-      challengeRetries: 0,
-    }))
-    const result = await provider.fetch({ url: baseUrl })
-    expect(result.body.kind).toBe('html')
-    if (result.body.kind === 'html') expect(result.body.content).toContain('<article>')
-  })
-})
 
 describe('MoliFetchProvider Local CDP integration', () => {
   it('fetches through managed local Moli daemon over CDP and denoises it', { timeout: 60_000 }, async () => {

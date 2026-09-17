@@ -55,7 +55,7 @@ export class MoliCardController {
     this.form = new CardForm(
       scope,
       [
-        radioField('backend', ['local', 'cdp', 'cli']),
+        radioField('backend', ['local', 'cdp']),
         textField('moliPath'),
         textField('cdpEndpoint'),
         checkboxField('shareBrowserContext'),

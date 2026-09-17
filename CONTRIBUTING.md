@@ -12,7 +12,6 @@ src/
 ├── markdown.ts        # denoise pipeline (LinkeDOM + Readability + mdream)
 ├── moli-resolve.ts    # local backend discovery and auto-download
 ├── moli-process.ts    # local managed Moli daemon lifecycle
-├── cli-runner.ts      # direct one-shot CLI execution
 ├── hooks.ts           # CSP bypass and IntersectionObserver sentinels
 ├── cdp-pool.ts        # pooled and shared CDP browser sessions
 ├── types.ts           # structural CDP/Moli types

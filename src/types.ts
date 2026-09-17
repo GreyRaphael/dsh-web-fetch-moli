@@ -10,7 +10,7 @@
  */
 
 /** Which Moli backend serves a fetch. */
-export type MoliBackend = 'local' | 'cdp' | 'cli'
+export type MoliBackend = 'local' | 'cdp'
 
 /**
  * How the CDP backend scopes a fetch: a throwaway isolated context, or a tab
@@ -105,13 +105,6 @@ export interface CdpChromium {
   connectOverCDP(endpointURL: string, options?: { timeout?: number }): Promise<CdpBrowser>
 }
 
-/** Execution result from direct Moli CLI invocation (`moli fetch`). */
-export interface MoliCliResult {
-  statusCode: number
-  contentType?: string
-  content: string
-  url: string
-}
 
 /** Backward-compatibility type aliases */
 export type PlaywrightResponse = CdpResponse

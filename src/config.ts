@@ -23,9 +23,6 @@ export const DEFAULT_MAX_CONCURRENCY_LOCAL = 20
  */
 export const DEFAULT_MAX_CONCURRENCY_CDP = 50
 
-/** Default concurrency for one-shot CLI execution. */
-export const DEFAULT_MAX_CONCURRENCY_CLI = 8
-
 /** Ceiling the schema accepts for `maxConcurrency`. */
 export const MAX_CONCURRENCY_CEILING = 200
 
@@ -105,7 +102,7 @@ export interface Config {
 }
 
 export const Config: z<Config> = z.object({
-  backend: z.union([z.const('local'), z.const('cdp'), z.const('cli')]).default('local'),
+  backend: z.union([z.const('local'), z.const('cdp')]).default('local'),
   moliPath: z.string().default(''),
   cdpEndpoint: z.string().default(''),
   shareBrowserContext: z.boolean().default(true),
@@ -140,7 +137,6 @@ export function effectiveTimeoutMs(config: Pick<Config, 'timeoutMs'>): number {
 export function effectiveMaxConcurrency(config: Pick<Config, 'backend' | 'maxConcurrency'>): number {
   if (typeof config.maxConcurrency === 'number') return config.maxConcurrency
   if (config.backend === 'cdp') return DEFAULT_MAX_CONCURRENCY_CDP
-  if (config.backend === 'cli') return DEFAULT_MAX_CONCURRENCY_CLI
   return DEFAULT_MAX_CONCURRENCY_LOCAL
 }
 

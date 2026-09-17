@@ -58,7 +58,7 @@ class FakeScope implements SettingsScope<Record<string, unknown>> {
 /** The card's field set: backend radio, two text inputs, two checkboxes, two numbers. */
 function makeForm(scope: SettingsScope<Record<string, unknown>>) {
   return new CardForm(scope, [
-    radioField('backend', ['local', 'cdp', 'cli']),
+    radioField('backend', ['local', 'cdp']),
     textField('moliPath'),
     checkboxField('shareBrowserContext'),
     checkboxField('denoise'),

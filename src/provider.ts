@@ -19,7 +19,6 @@ import {
   DEFAULT_CHALLENGE_RETRIES,
   DEFAULT_CHALLENGE_WAIT_MS,
   DEFAULT_MAX_CONCURRENCY_CDP,
-  DEFAULT_MAX_CONCURRENCY_CLI,
   DEFAULT_MAX_CONCURRENCY_LOCAL,
   DEFAULT_TIMEOUT_MS,
   effectiveChallengeRetries,
@@ -36,7 +35,6 @@ import { forceLayoutMaterialization, scrollIntoViewNative, setupPageHooks } from
 import { htmlToMarkdown } from './markdown.ts'
 import { MoliProcessManager } from './moli-process.ts'
 import { resolveCdpBackend, resolveMoliBinary } from './moli-resolve.ts'
-import { runMoliFetch } from './cli-runner.ts'
 import type { CdpBrowser, CdpContext, CdpPage, CdpResponse } from './types.ts'
 
 /** Stable id this provider registers under in ctx.web. */
@@ -267,10 +265,6 @@ export class MoliFetchProvider implements WebFetchProvider {
     let acquired = true
 
     try {
-      if (config.backend === 'cli') {
-        return await this.fetchViaCli(url, config, deadline)
-      }
-
       // CDP mode execution (local daemon or remote endpoint)
       let session: MoliBrowserSession | undefined
       try {
@@ -291,38 +285,6 @@ export class MoliFetchProvider implements WebFetchProvider {
       throw translateError(error, deadline)
     } finally {
       if (acquired) this.semaphore.release()
-    }
-  }
-
-  /** One-shot CLI fetch via `moli fetch`. */
-  private async fetchViaCli(url: URL, config: ResolvedConfig, deadline: Deadline): Promise<WebFetchResult> {
-    const moliBin = await resolveMoliBinary(config.moliPath)
-    try {
-      const cliResult = await runMoliFetch({
-        moliPath: moliBin,
-        url: url.toString(),
-        dump: 'html',
-        timeoutMs: deadline.remainingMs(),
-        signal: deadline.signal,
-        layout: true,
-        resource: true,
-        waitUntil: 'networkidle',
-        insecure: true,
-      })
-
-      if (config.denoise === false) {
-        return capResult(url.toString(), cliResult.statusCode, { kind: 'html', content: cliResult.content })
-      }
-
-      const bounded = cliResult.content.length > MAX_PIPELINE_INPUT_CHARS
-        ? cliResult.content.slice(0, MAX_PIPELINE_INPUT_CHARS)
-        : cliResult.content
-
-      const { markdown } = htmlToMarkdown(bounded, url.toString())
-      const result = capResult(url.toString(), cliResult.statusCode, { kind: 'text', content: markdown })
-      return bounded !== cliResult.content ? { ...result, truncated: true } : result
-    } catch (error: unknown) {
-      throw translateError(error, deadline)
     }
   }
 

@@ -21,7 +21,7 @@ export function MoliCard(props: MoliCardProps) {
   const { t } = props
   const state = props.useMoliCard(snapshot => snapshot)
   const disabled = !state.writable
-  const backend = state.backend.text === 'cdp' ? 'cdp' : state.backend.text === 'cli' ? 'cli' : 'local'
+  const backend = state.backend.text === 'cdp' ? 'cdp' : 'local'
 
   const bindValue = (
     field: 'moliPath' | 'cdpEndpoint' | 'timeoutMs' | 'maxConcurrency' | 'challengeWaitMs',
@@ -97,22 +97,21 @@ export function MoliCard(props: MoliCardProps) {
             value: 'cdp',
             label: t('backendCdp'),
             hint: t('backendCdpHint'),
-            content: bindValue('cdpEndpoint', {
-              id: 'plugin-config-moli-cdp',
-              embedded: true,
-              disabled: disabled || backend !== 'cdp',
-              placeholder: '127.0.0.1:9222',
-            }),
-          },
-          {
-            value: 'cli',
-            label: t('backendCli'),
-            hint: t('backendCliHint'),
-            content: bindValue('moliPath', {
-              id: 'plugin-config-moli-path-cli',
-              embedded: true,
-              disabled: disabled || backend !== 'cli',
-            }),
+            content: (
+              <>
+                {bindValue('cdpEndpoint', {
+                  id: 'plugin-config-moli-cdp',
+                  embedded: true,
+                  disabled: disabled || backend !== 'cdp',
+                  placeholder: '127.0.0.1:9222',
+                })}
+                {bindCheckbox('shareBrowserContext', {
+                  id: 'plugin-config-moli-share-context',
+                  embedded: true,
+                  disabled: disabled || backend !== 'cdp',
+                })}
+              </>
+            ),
           },
         ]}
         text={state.backend.text}
@@ -126,7 +125,6 @@ export function MoliCard(props: MoliCardProps) {
 
       {bindCheckbox('bypassCsp')}
       {bindCheckbox('autoScrollSentinel')}
-      {bindCheckbox('shareBrowserContext')}
       {bindCheckbox('denoise')}
       {bindValue('timeoutMs')}
       {bindValue('maxConcurrency')}
