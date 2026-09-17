@@ -18,7 +18,6 @@ class FakePage {
     waitForLoadState: async () => {},
     url: () => 'about:blank',
     content: async () => '',
-    route: async () => {},
     close: async () => { this.closedFlag = true },
   }
   get closed(): boolean { return this.closedFlag }
@@ -39,7 +38,6 @@ class FakeContext {
       this.pages.push(page)
       return page.page
     },
-    route: async () => {},
     close: async () => { this.closedFlag = true },
   }
   get closed(): boolean { return this.closedFlag }

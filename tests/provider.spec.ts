@@ -156,7 +156,6 @@ function makeFakePage(spec: FakePageSpec, state: FakePageState, popupListeners: 
       state.pageClosed = true
       for (const reject of gotoRejecters.splice(0)) reject(new Error('Target closed'))
     },
-    route: async () => {},
     on: (event: 'popup' | 'response', listener: ((page: CdpPage) => void) | ((response: CdpResponse) => void)) => {
       if (event === 'popup') popupListeners.push(listener as (page: CdpPage) => void)
       else responseListeners.push(listener as (response: CdpResponse) => void)
@@ -178,7 +177,6 @@ function fakeSession(spec: FakePageSpec): MoliBrowserSession {
   const page = makeFakePage(spec, pageState)
   const context: CdpContext = {
     newPage: async () => page,
-    route: async () => {},
     close: async () => { closed.context = true },
   }
   const browser: CdpBrowser = {
@@ -305,7 +303,6 @@ function fakeCdpConnection(spec: FakePageSpec = {}) {
       state.defaultPagesOpened++
       return makePage()
     },
-    route: async () => {},
     close: async () => { state.defaultContextClosed++ },
   }
   const browser: CdpBrowser = {
@@ -313,7 +310,6 @@ function fakeCdpConnection(spec: FakePageSpec = {}) {
       state.isolatedContextsOpened++
       const context: CdpContext = {
         newPage: async () => makePage(),
-        route: async () => {},
         close: async () => { state.isolatedContextsClosed++ },
       }
       return context

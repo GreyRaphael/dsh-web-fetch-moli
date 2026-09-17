@@ -42,12 +42,6 @@ export interface CdpRequest {
   frame?(): unknown
 }
 
-/** Low-level CDP session for raw DevTools Protocol commands (e.g. Page.setBypassCSP). */
-export interface CdpSession {
-  send(method: string, params?: Record<string, unknown>): Promise<unknown>
-  detach(): Promise<void>
-}
-
 /** A page inside a context. */
 export interface CdpPage {
   goto(url: string, options?: { waitUntil?: 'load' | 'domcontentloaded' | 'networkidle' | 'commit'; timeout?: number }): Promise<CdpResponse | null>
@@ -55,11 +49,6 @@ export interface CdpPage {
   url(): string
   content(): Promise<string>
   close(): Promise<void>
-  /**
-   * Resource-filter interception at page level — installed on the page (not
-   * its context) so profile mode never intercepts tabs it does not own.
-   */
-  route(glob: string, handler: (route: CdpRoute) => Promise<void>): Promise<void>
   /** Popup notification; the fetch closes whatever its page spawns. */
   on?(event: 'popup', listener: (page: CdpPage) => void): unknown
   /**
@@ -91,16 +80,7 @@ export interface CdpPage {
  */
 export interface CdpContext {
   newPage(): Promise<CdpPage>
-  route(glob: string, handler: (route: CdpRoute) => Promise<void>): Promise<void>
   close(): Promise<void>
-  newCDPSession?(page: CdpPage): Promise<CdpSession>
-}
-
-/** A route interception decision. */
-export interface CdpRoute {
-  request(): { resourceType(): string }
-  abort(): Promise<void>
-  continue(): Promise<void>
 }
 
 /** A browser instance (launched locally or connected over CDP). */
@@ -117,8 +97,6 @@ export interface CdpBrowser {
   isConnected?(): boolean
   /** Optional disconnect notification used to drop a stale shared CDP connection. */
   on?(event: 'disconnected', listener: () => void): unknown
-  /** Create a CDP session directly on browser target if supported. */
-  newBrowserCDPSession?(): Promise<CdpSession>
 }
 
 /** The `chromium` namespace of whichever protocol driver serves a fetch. */
@@ -138,9 +116,7 @@ export interface MoliCliResult {
 /** Backward-compatibility type aliases */
 export type PlaywrightResponse = CdpResponse
 export type PlaywrightRequest = CdpRequest
-export type PlaywrightCDPSession = CdpSession
 export type PlaywrightPage = CdpPage
 export type PlaywrightContext = CdpContext
-export type PlaywrightRoute = CdpRoute
 export type PlaywrightBrowser = CdpBrowser
 export type PlaywrightChromium = CdpChromium

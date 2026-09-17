@@ -13,8 +13,6 @@ import type {
   CdpPage,
   CdpRequest,
   CdpResponse,
-  CdpRoute,
-  CdpSession,
 } from './types.ts'
 
 interface CdpMessage {
@@ -245,7 +243,6 @@ export class NativeCdpBrowser implements CdpBrowser {
 
 export class NativeCdpContext implements CdpContext {
   private isClosed = false
-  private readonly routeHandlers: Array<{ pattern: RegExp; handler: (route: CdpRoute) => Promise<void> }> = []
 
   constructor(
     public readonly browser: NativeCdpBrowser,
@@ -268,27 +265,7 @@ export class NativeCdpContext implements CdpContext {
     this.browser.registerSession(sessionId, page)
 
     await page.init()
-
-    // Apply context route handlers if any
-    for (const { pattern, handler } of this.routeHandlers) {
-      await page.addRoute(pattern, handler)
-    }
-
     return page
-  }
-
-  async route(glob: string, handler: (route: CdpRoute) => Promise<void>): Promise<void> {
-    const pattern = globToRegExp(glob)
-    this.routeHandlers.push({ pattern, handler })
-  }
-
-  async newCDPSession(page: CdpPage): Promise<CdpSession> {
-    if (this.isClosed) throw new Error('Target closed')
-    const nativePage = page as NativeCdpPage
-    return {
-      send: (method: string, params?: Record<string, unknown>) => nativePage.send(method, params),
-      detach: async () => {},
-    }
   }
 
   async close(): Promise<void> {
@@ -306,8 +283,6 @@ export class NativeCdpPage implements CdpPage {
   private mainFrameId = ''
   private readonly responseListeners = new Set<(response: CdpResponse) => void>()
   private readonly popupListeners = new Set<(page: CdpPage) => void>()
-  private readonly routeHandlers: Array<{ pattern: RegExp; handler: (route: CdpRoute) => Promise<void> }> = []
-  private fetchEnabled = false
 
   // Lifecycle waiters
   private domContentLoaded = false
@@ -596,19 +571,6 @@ export class NativeCdpPage implements CdpPage {
     return res?.result?.value
   }
 
-  async route(glob: string, handler: (route: CdpRoute) => Promise<void>): Promise<void> {
-    const pattern = globToRegExp(glob)
-    await this.addRoute(pattern, handler)
-  }
-
-  async addRoute(pattern: RegExp, handler: (route: CdpRoute) => Promise<void>): Promise<void> {
-    this.routeHandlers.push({ pattern, handler })
-    if (!this.fetchEnabled) {
-      this.fetchEnabled = true
-      await this.send('Fetch.enable', {}).catch(() => {})
-    }
-  }
-
   on(event: 'popup' | 'response', listener: ((page: CdpPage) => void) | ((response: CdpResponse) => void)): void {
     if (event === 'popup') {
       this.popupListeners.add(listener as (page: CdpPage) => void)
@@ -686,33 +648,6 @@ export class NativeCdpPage implements CdpPage {
           try { listener(resp) } catch {}
         }
       }
-    } else if (method === 'Fetch.requestPaused') {
-      const requestId = params.requestId as string
-      const request = params.request as { url?: string; method?: string; headers?: Record<string, string> } | undefined
-      const reqUrl = request?.url ?? ''
-      const resourceType = (params.resourceType as string ?? '').toLowerCase()
-
-      const routeObj: CdpRoute = {
-        request: () => ({
-          url: () => reqUrl,
-          resourceType: () => resourceType,
-        }),
-        abort: async () => {
-          await this.send('Fetch.failRequest', { requestId, errorReason: 'Aborted' }).catch(() => {})
-        },
-        continue: async () => {
-          await this.send('Fetch.continueRequest', { requestId }).catch(() => {})
-        },
-      }
-
-      const matchedHandler = this.routeHandlers.find(({ pattern }) => pattern.test(reqUrl))
-      if (matchedHandler) {
-        Promise.resolve(matchedHandler.handler(routeObj)).catch(() => {
-          void routeObj.continue()
-        })
-      } else {
-        void routeObj.continue()
-      }
     } else if (method === 'Network.requestWillBeSent') {
       const reqId = params.requestId as string | undefined
       if (reqId) {
@@ -779,13 +714,4 @@ export class NativeCdpResponse implements CdpResponse {
       frame: () => this._mainFrameId,
     }
   }
-}
-
-/** Convert a simple glob (*, **) to a RegExp. */
-function globToRegExp(glob: string): RegExp {
-  const escaped = glob
-    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    .replace(/\*\*/g, '.*')
-    .replace(/(?<!\.)\*/g, '[^/]*')
-  return new RegExp(`^${escaped}$`)
 }

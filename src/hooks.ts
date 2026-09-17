@@ -18,12 +18,6 @@ async function sendCdp(page: CdpPage, method: string, params: Record<string, unk
   try {
     if (typeof page.send === 'function') {
       await page.send(method, params)
-    } else {
-      const context = page.context?.()
-      if (typeof context?.newCDPSession === 'function') {
-        const cdp = await context.newCDPSession(page)
-        await cdp.send(method, params)
-      }
     }
   } catch {
     // Best-effort for cross-CDP engine compatibility

@@ -37,7 +37,7 @@ import { htmlToMarkdown } from './markdown.ts'
 import { MoliProcessManager } from './moli-process.ts'
 import { resolveCdpBackend, resolveMoliBinary } from './moli-resolve.ts'
 import { runMoliFetch } from './cli-runner.ts'
-import type { CdpBrowser, CdpContext, CdpPage, CdpResponse, CdpRoute } from './types.ts'
+import type { CdpBrowser, CdpContext, CdpPage, CdpResponse } from './types.ts'
 
 /** Stable id this provider registers under in ctx.web. */
 export const MOLI_FETCH_PROVIDER_ID = 'moli'
@@ -703,19 +703,6 @@ async function defaultCdpConnect(endpoint: string, timeoutMs: number): Promise<C
   return await chromium.connectOverCDP(endpoint, { timeout: timeoutMs })
 }
 
-async function installResourceFilter(owner: {
-  route(glob: string, handler: (route: CdpRoute) => Promise<void>): Promise<void>
-}): Promise<void> {
-  try {
-    await owner.route('**/*', async (route) => {
-      const type = route.request().resourceType()
-      if (type === 'image' || type === 'font' || type === 'media') await route.abort()
-      else await route.continue()
-    })
-  } catch {
-    // Keep going without filter
-  }
-}
 
 function guardPopups(page: CdpPage): void {
   try {
