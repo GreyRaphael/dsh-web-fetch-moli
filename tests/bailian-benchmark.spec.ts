@@ -61,7 +61,7 @@ describe('Bailian micro-frontend real-world benchmark', () => {
       const markdown = result.body.content
 
       const cardCount = (markdown.match(/最新版本/g) || []).length
-      console.log(`[Bailian Benchmark] Extracted model cards: ${cardCount}`)
+      console.log(`[Bailian Benchmark] Extracted model cards: ${cardCount}, fetch elapsed: ${elapsed.toFixed(2)}s`)
 
       if (markdown.length < 100) {
         console.warn(`[Bailian Benchmark] Received short response (${markdown.length} chars), likely anti-bot redirect or geoblock from current network. Skipping assertions.`)

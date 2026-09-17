@@ -304,6 +304,10 @@ export class MoliFetchProvider implements WebFetchProvider {
         dump: 'html',
         timeoutMs: deadline.remainingMs(),
         signal: deadline.signal,
+        layout: true,
+        resource: true,
+        waitUntil: 'networkidle',
+        insecure: true,
       })
 
       if (config.denoise === false) {
@@ -439,6 +443,7 @@ export class MoliFetchProvider implements WebFetchProvider {
     }
     const bounded = html.length > MAX_PIPELINE_INPUT_CHARS ? html.slice(0, MAX_PIPELINE_INPUT_CHARS) : html
     const { markdown } = htmlToMarkdown(bounded, finalUrl)
+
     const result = capResult(finalUrl, statusCode, { kind: 'text', content: markdown })
     return bounded !== html ? { ...result, truncated: true } : result
   }
@@ -454,6 +459,7 @@ export class MoliFetchProvider implements WebFetchProvider {
     if (maxWaitMs <= 0) return
     const start = Date.now()
 
+    let pollInterval = 250
     while (Date.now() - start < maxWaitMs && deadline.remainingMs() > 4_000) {
       let isUnsettled = false
       try {
@@ -504,7 +510,8 @@ export class MoliFetchProvider implements WebFetchProvider {
       if (!isUnsettled) {
         break
       }
-      await sleep(Math.min(250, deadline.remainingMs()))
+      await sleep(Math.min(pollInterval, deadline.remainingMs()))
+      pollInterval = Math.min(800, Math.floor(pollInterval * 1.4))
     }
   }
 

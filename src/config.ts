@@ -32,13 +32,13 @@ export const MAX_CONCURRENCY_CEILING = 200
 /**
  * Default bounded wait (ms) for a Cloudflare challenge to clear naturally.
  */
-export const DEFAULT_CHALLENGE_WAIT_MS = 15_000
+export const DEFAULT_CHALLENGE_WAIT_MS = 5_000
 
 /** Ceiling the schema accepts for `challengeWaitMs`. */
 export const MAX_CHALLENGE_WAIT_MS = 60_000
 
 /** Default same-page re-navigation attempts after a challenge wait runs out. */
-export const DEFAULT_CHALLENGE_RETRIES = 1
+export const DEFAULT_CHALLENGE_RETRIES = 0
 
 /** Ceiling the schema accepts for `challengeRetries`. */
 export const MAX_CHALLENGE_RETRIES = 3

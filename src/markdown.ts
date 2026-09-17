@@ -116,18 +116,15 @@ export function htmlToMarkdown(html: string, url: string): DenoiseResult {
   let mode: DenoiseMode = 'article'
 
   const doc = document as unknown as Document
-  const mainEl = doc.querySelector?.('main, [role="main"], article, .markdown-body, .icms-help-docs-content, .aliyun-docs-content')
-  const targetDoc = (mainEl && (mainEl.textContent?.trim().length ?? 0) > 300)
-    ? (parseHTML(`<!doctype html><html><head><title>${title}</title></head><body>${mainEl.innerHTML}</body></html>`).document as unknown as Document)
-    : doc
+  const mainEl = doc.querySelector?.('main, [role="main"], article, .markdown-body, .docs-content, [class*="article-content" i], [class*="doc-content" i]')
 
   // 4. Phase 1: Mozilla Readability scoring
   try {
-    const cloned = targetDoc.cloneNode(true)
-    const reader = new Readability(cloned as unknown as Document)
+    const cloned = doc.cloneNode(true) as unknown as Document
+    const reader = new Readability(cloned)
     const article = reader.parse()
     if (article && article.content && article.content.trim()) {
-      const targetText = targetDoc.body?.textContent?.trim() ?? ''
+      const targetText = doc.body?.textContent?.trim() ?? ''
       const articleText = article.textContent?.trim() ?? ''
 
       // Guard against Readability false-positives on catalogs, dashboards, and SPAs:
@@ -136,7 +133,7 @@ export function htmlToMarkdown(html: string, url: string): DenoiseResult {
       // latches onto a tiny footer/disclaimer paragraph (< 500 chars) and discards the entire
       // body text (> 1500 chars). In such cases, prefer the cleaned document body / main container.
       const isTinyArticleFraction = targetText.length > 1500 && (articleText.length * 3 < targetText.length) && articleText.length < 1500
-      const isCardHeavyBody = (targetDoc.querySelectorAll?.('[class*="card"], [class*="item"], [class*="model"]').length ?? 0) >= 5 && articleText.length < 1000
+      const isCardHeavyBody = (doc.querySelectorAll?.('[class*="card"], [class*="item"], [class*="model"]').length ?? 0) >= 5 && articleText.length < 1000
 
       if (isTinyArticleFraction || isCardHeavyBody) {
         // Discard false positive article, allow fallback to cleaned document body

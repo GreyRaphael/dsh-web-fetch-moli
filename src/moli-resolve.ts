@@ -200,6 +200,11 @@ export async function syncLatestMoliOnPluginUpdate(destinationDir?: string): Pro
     return
   }
 
+  // In test environment, skip remote GitHub check unless explicitly opted in
+  if ((process.env.VITEST || process.env.NODE_ENV === 'test') && !process.env.RUN_ONLINE_BENCHMARK) {
+    return
+  }
+
   const isWindows = process.platform === 'win32'
   const binName = isWindows ? 'moli.exe' : 'moli'
   const targetBinaryPath = join(destDir, binName)
@@ -402,7 +407,20 @@ export async function downloadLatestMoliBinary(
           )
         }
       } else {
-        execFileSync('tar', ['-xzf', tempArchive, '-C', tempExtractDir], { stdio: 'pipe' })
+        try {
+          execFileSync('tar', ['--no-same-owner', '-m', '-xzf', tempArchive, '-C', tempExtractDir], { stdio: 'pipe' })
+        } catch (tarErr) {
+          // Check if binary was extracted despite non-fatal tar warnings (e.g. utime)
+          if (!findBinaryRecursively(tempExtractDir, binName)) {
+            try {
+              execFileSync('tar', ['-xzf', tempArchive, '-C', tempExtractDir], { stdio: 'pipe' })
+            } catch {
+              if (!findBinaryRecursively(tempExtractDir, binName)) {
+                throw tarErr
+              }
+            }
+          }
+        }
       }
 
       const foundBinary = findBinaryRecursively(tempExtractDir, binName)

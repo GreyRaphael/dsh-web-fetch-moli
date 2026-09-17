@@ -16,6 +16,10 @@ export interface RunMoliCliOptions {
   dump?: 'html' | 'markdown' | 'json'
   timeoutMs?: number
   signal?: AbortSignal
+  layout?: boolean
+  resource?: boolean
+  waitUntil?: 'domcontentloaded' | 'load' | 'networkidle' | 'domstable' | 'done'
+  insecure?: boolean
 }
 
 /**
@@ -32,6 +36,18 @@ export async function runMoliFetch(options: RunMoliCliOptions): Promise<MoliCliR
   }
 
   const args: string[] = ['fetch', url, '--dump', dump, '--timeout', String(timeoutMs)]
+  if (options.layout !== false) {
+    args.push('-l')
+  }
+  if (options.resource !== false) {
+    args.push('-r')
+  }
+  if (options.insecure !== false) {
+    args.push('--insecure-disable-tls-host-verification')
+  }
+  if (options.waitUntil) {
+    args.push('--wait-until', options.waitUntil)
+  }
 
   return new Promise<MoliCliResult>((resolve, reject) => {
     let child: ReturnType<typeof spawn> | undefined

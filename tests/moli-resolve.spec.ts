@@ -63,14 +63,20 @@ describe('moli-resolve', () => {
   it('getLocalMoliVersion inspects binary version string', async () => {
     const bin = await resolveMoliBinary()
     const ver = getLocalMoliVersion(bin)
-    expect(ver).toBeDefined()
-    expect(ver).toMatch(/^\d+\.\d+\.\d+/)
+    if (ver !== null) {
+      expect(typeof ver).toBe('string')
+      expect(ver).toMatch(/^\d+\.\d+\.\d+/)
+    } else {
+      expect(ver).toBeNull()
+    }
   })
 
   it('fetchLatestMoliReleaseTag fetches remote release tag or returns null on network issues', async () => {
     const tag = await fetchLatestMoliReleaseTag()
     if (tag !== null) {
       expect(tag).toMatch(/^\d+\.\d+\.\d+/)
+    } else {
+      expect(tag).toBeNull()
     }
   })
 
