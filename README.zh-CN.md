@@ -2,7 +2,7 @@
 
 [English](./README.md) · [GitHub](https://github.com/GreyRaphael/dsh-web-fetch-moli)
 
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) 官方生态插件，为内置 `web_fetch` 工具提供基于 [Moli](https://github.com/lexmount/moli)（超轻量级 Rust 无头浏览器）的渲染后端。在仅占用 **~60MB 内存**（相比 Chromium/Playwright 的 ~1GB 降低超 90%）的前提下，完美支持企业级复杂微前端（Micro-Frontend）、动态单页应用（SPA）与静态页面，并通过 **LinkeDOM + Readability + mdream** 高性能双阶段管道降噪清洗后输出规范的大模型优化 Markdown。
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) 官方生态插件，为内置 `web_fetch` 工具提供基于 [Moli](https://github.com/GreyRaphael/moli)（超轻量级 Rust 无头浏览器）的渲染后端。在仅占用 **~60MB 内存**（相比 Chromium/Playwright 的 ~1GB 降低超 90%）的前提下，完美支持企业级复杂微前端（Micro-Frontend）、动态单页应用（SPA）与静态页面，并通过 **LinkeDOM + Readability + mdream** 高性能双阶段管道降噪清洗后输出规范的大模型优化 Markdown。
 
 ## 核心特性
 
@@ -42,11 +42,11 @@ web_fetch (tool-web)
 
 - DeepSeek Harness (`dsh web`)，Node.js ≥ 20。
 - **免手动安装**：插件内置**首次使用自动下载安装**能力。若检测到系统中未安装 Moli，会自动从官方 Release 下载适配当前操作系统与 CPU 架构（Linux、macOS、Windows x86_64 / arm64）的最新版二进制并就绪，开箱即用。
-- 亦支持使用已有的 [Moli](https://github.com/lexmount/moli) v1.1.5+（置于系统 `$PATH`、`~/.local/bin/moli`，或在配置项中指定 `moliPath`）。
+- 亦支持使用已有的 [Moli](https://github.com/GreyRaphael/moli) v1.1.5+（置于系统 `$PATH`、`~/.local/bin/moli`，或在配置项中指定 `moliPath`）。
 
 手动安装参考（可选）：
 ```sh
-curl -sSL https://github.com/lexmount/moli/releases/latest/download/moli-x86_64-unknown-linux-gnu.tar.gz | tar -xz -C ~/.local/bin
+curl -sSL https://github.com/GreyRaphael/moli/releases/latest/download/moli-x86_64-unknown-linux-gnu.tar.gz | tar -xz -C ~/.local/bin
 chmod +x ~/.local/bin/moli
 ```
 

@@ -42,10 +42,14 @@ export {
 } from './hooks.ts'
 export type { NativeScrollResult } from './hooks.ts'
 export {
+  downloadLatestMoliBinary,
   fetchLatestMoliReleaseTag,
   findOnPath,
   getLocalMoliVersion,
+  getMoliReleaseAsset,
   getPluginPackageVersion,
+  MOLI_RELEASES_URL,
+  MOLI_REPO_SLUG,
   resolveCdpBackend,
   resolveMoliBinary,
   syncLatestMoliOnPluginUpdate,

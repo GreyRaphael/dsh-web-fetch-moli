@@ -38,6 +38,23 @@ import { connectCdp } from './cdp-client.ts'
 /** Memoized path to resolved Moli binary. */
 const resolvedMoliCache = new Map<string, string>()
 
+/**
+ * Base URL of the Moli upstream GitHub Releases.
+ *
+ * Moli binaries are sourced from the GreyRaphael/moli fork, which carries
+ * upstream's release asset naming (moli-<target>.tar.gz / .zip) verbatim.
+ */
+export const MOLI_RELEASES_URL = 'https://github.com/GreyRaphael/moli/releases'
+
+/** Redirect endpoint resolving to the latest release tag. */
+const MOLI_LATEST_RELEASE_URL = `${MOLI_RELEASES_URL}/latest`
+
+/** Latest-release asset download base (`/releases/latest/download/<asset>`). */
+const MOLI_LATEST_DOWNLOAD_URL = `${MOLI_LATEST_RELEASE_URL}/download`
+
+/** GitHub `owner/repo` slug of the Moli binary upstream. */
+export const MOLI_REPO_SLUG = 'GreyRaphael/moli'
+
 /** In-flight download promises keyed by destination directory. */
 const inFlightDownloads = new Map<string, Promise<string>>()
 
@@ -140,7 +157,7 @@ export async function fetchLatestMoliReleaseTag(): Promise<string | null> {
   try {
     const stdout = execFileSync(
       'curl',
-      ['-sI', '--connect-timeout', '5', '--max-time', '8', 'https://github.com/lexmount/moli/releases/latest'],
+      ['-sI', '--connect-timeout', '5', '--max-time', '8', MOLI_LATEST_RELEASE_URL],
       {
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -156,7 +173,7 @@ export async function fetchLatestMoliReleaseTag(): Promise<string | null> {
 
   // 2. Fallback to native fetch
   try {
-    const resp = await fetch('https://github.com/lexmount/moli/releases/latest', {
+    const resp = await fetch(MOLI_LATEST_RELEASE_URL, {
       method: 'HEAD',
       redirect: 'manual',
       signal: AbortSignal.timeout(6000),
@@ -363,7 +380,7 @@ export async function downloadLatestMoliBinary(
     }
 
     const { filename, isZip } = getMoliReleaseAsset()
-    const downloadUrl = `https://github.com/lexmount/moli/releases/latest/download/${filename}`
+    const downloadUrl = `${MOLI_LATEST_DOWNLOAD_URL}/${filename}`
     console.info(`[dsh-web-fetch-moli] Downloading latest official Moli release from ${downloadUrl}...`)
 
     const tempArchive = join(destDir, `.download-${String(Date.now())}-${filename}`)

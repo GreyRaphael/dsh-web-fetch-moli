@@ -35,7 +35,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           mkdir -p /tmp/moli-install
-          curl -sL https://github.com/lexmount/moli/releases/latest/download/moli-x86_64-unknown-linux-gnu.tar.gz | tar -xz --strip-components=1 -C /tmp/moli-install
+          curl -sL https://github.com/GreyRaphael/moli/releases/latest/download/moli-x86_64-unknown-linux-gnu.tar.gz | tar -xz --strip-components=1 -C /tmp/moli-install
           sudo mv /tmp/moli-install/moli /usr/local/bin/moli
           rm -rf /tmp/moli-install
           moli --version

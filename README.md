@@ -2,7 +2,7 @@
 
 [中文](./README.zh-CN.md) · [GitHub](https://github.com/GreyRaphael/dsh-web-fetch-moli)
 
-A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) plugin providing a **Moli** backend for the `web_fetch` tool. Built on [Moli](https://github.com/lexmount/moli) (an ultra-lightweight Rust headless browser), it renders dynamic micro-frontends, single-page applications (SPAs), and static sites with **~60MB memory footprint** (>90% reduction compared to ~1GB for standard Chromium/Playwright), denoises pages via **LinkeDOM + Readability + mdream**, and returns clean, LLM-optimized GitHub Flavored Markdown.
+A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) plugin providing a **Moli** backend for the `web_fetch` tool. Built on [Moli](https://github.com/GreyRaphael/moli) (an ultra-lightweight Rust headless browser), it renders dynamic micro-frontends, single-page applications (SPAs), and static sites with **~60MB memory footprint** (>90% reduction compared to ~1GB for standard Chromium/Playwright), denoises pages via **LinkeDOM + Readability + mdream**, and returns clean, LLM-optimized GitHub Flavored Markdown.
 
 ## Key Highlights
 
@@ -40,11 +40,11 @@ web_fetch (tool-web)
 
 - DeepSeek Harness (`dsh web`), Node.js ≥ 20.
 - **Zero manual setup**: the plugin features **automatic download on first use**. If no `moli` binary is detected on your system, it automatically downloads and unpacks the latest release binary matching your OS and architecture (Linux, macOS, Windows x86_64 / arm64) into `~/.cache/moli`.
-- Existing installations of [Moli](https://github.com/lexmount/moli) v1.1.5+ are automatically detected on `$PATH`, `~/.local/bin/moli`, or via the `moliPath` setting.
+- Existing installations of [Moli](https://github.com/GreyRaphael/moli) v1.1.5+ are automatically detected on `$PATH`, `~/.local/bin/moli`, or via the `moliPath` setting.
 
 Manual installation (optional):
 ```sh
-curl -sSL https://github.com/lexmount/moli/releases/latest/download/moli-x86_64-unknown-linux-gnu.tar.gz | tar -xz -C ~/.local/bin
+curl -sSL https://github.com/GreyRaphael/moli/releases/latest/download/moli-x86_64-unknown-linux-gnu.tar.gz | tar -xz -C ~/.local/bin
 chmod +x ~/.local/bin/moli
 ```
 
