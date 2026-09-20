@@ -5,6 +5,24 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-09-20
+
+### Changed
+
+- **Moli 二进制上游切换至 `GreyRaphael/moli` fork（性能增强版）**:
+  - `src/moli-resolve.ts` 新增 `MOLI_RELEASES_URL` / `MOLI_REPO_SLUG` 常量，将版本探测（curl HEAD 与原生 fetch 兜底）与二进制自动下载的 3 处硬编码 `lexmount/moli` URL 全部切换为 `GreyRaphael/moli`。
+  - 新增 `MOLI_LATEST_DOWNLOAD_URL` 常量固化 GitHub "latest" 资产的正确下载路径格式（`/releases/latest/download/<asset>`），修复仅拼 `/releases/download/<asset>`（缺少 `latest` 段）导致 404 的隐患。
+  - fork 完整保留上游 release asset 命名（`moli-<target>.tar.gz` / `.zip`），平台与架构探测逻辑零改动。
+  - `src/index.ts` 新增导出 `downloadLatestMoliBinary`、`getMoliReleaseAsset`、`MOLI_RELEASES_URL`、`MOLI_REPO_SLUG`，方便外部工具复用解析与下载能力。
+  - 同步更新 `README.md`、`README.zh-CN.md` 与 `.github/workflows/ci.yml` 中的全部上游链接与安装命令。
+  - 新增 `scripts/switch-moli.mjs` 迁移脚本：走插件自身解析器校验新发布源并强制刷新本地 `~/.cache/moli/moli` 二进制（支持 `--force`）。
+
+### Verified
+
+- 本地缓存的 moli 二进制已升级至 fork 的 **v1.1.8**（原 1.1.7）。
+- 测试套件 13 个文件 134 项测试全部通过（含真实 moli 守护进程集成测试）。
+- 端到端验证：`moli serve` CDP 守护进程就绪、健康检查通过、页面渲染（example.com 返回 200）与去噪 Markdown 输出正常。
+
 ## [0.4.0] - 2026-09-17
 
 ### Changed
