@@ -53,6 +53,7 @@ export {
   resolveCdpBackend,
   resolveMoliBinary,
   syncLatestMoliOnPluginUpdate,
+  withFsLockRetry,
 } from './moli-resolve.ts'
 export {
   CHALLENGE_DOM_PROBE,

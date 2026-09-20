@@ -109,6 +109,55 @@ export function isExecutableFile(path: string): boolean {
   }
 }
 
+/** Error codes signaling a transient Windows file lock (AV scan, indexer, or a not-yet-released handle). */
+const TRANSIENT_LOCK_CODES = new Set(['EBUSY', 'EPERM', 'EACCES'])
+
+/** Default total budget for lock retries (~10.5s worst case). */
+const LOCK_RETRY_TIMEOUT_MS = 10_000
+
+/**
+ * Run a synchronous filesystem operation, retrying on transient Windows file locks.
+ *
+ * On Windows a freshly extracted/renamed executable is routinely held open
+ * (exclusive lock) for a short while by Defender or the search indexer, making
+ * an immediate `copyFileSync` fail with `EBUSY`. Retrying with exponential
+ * backoff rides out the scan window instead of failing the install.
+ *
+ * @param op - zero-arg synchronous operation to run.
+ * @param label - description used in the final error message.
+ * @param timeoutMs - total retry budget (default ~10s).
+ */
+export function withFsLockRetry<T>(op: () => T, label: string, timeoutMs = LOCK_RETRY_TIMEOUT_MS): T {
+  const deadline = Date.now() + timeoutMs
+  let delay = 150
+  let attempt = 0
+  // ~63 retries at 150ms growth cap; bounded so it cannot spin unbounded
+  for (;;) {
+    attempt++
+    try {
+      return op()
+    } catch (err: unknown) {
+      const code = (err as NodeJS.ErrnoException)?.code
+      if (code === undefined || !TRANSIENT_LOCK_CODES.has(code) || Date.now() >= deadline) {
+        if (TRANSIENT_LOCK_CODES.has(String(code)) && attempt > 1) {
+          // surface how long we waited before giving up
+          const wrapped = new Error(`${label} failed after ${attempt} attempts (${code}): ${String((err as Error)?.message ?? err)}`)
+          ;(wrapped as NodeJS.ErrnoException).cause = err
+          throw wrapped
+        }
+        throw err
+      }
+      // transient lock: back off and retry
+      const wakeup = Date.now() + delay
+      while (Date.now() < wakeup) {
+        // busy-ish sleep in sync context: Atomics.wait on a scratch buffer
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.min(delay, 200))
+      }
+      delay = Math.min(delay * 2, 2000)
+    }
+  }
+}
+
 /**
  * Read current dsh-web-fetch-moli package version from package.json.
  */
@@ -445,29 +494,32 @@ export async function downloadLatestMoliBinary(
         throw new Error(`could not locate "${binName}" inside downloaded archive`)
       }
 
-      // Atomically install via temp sibling
+      // Atomically install via temp sibling. All ops retry on transient
+      // Windows locks: a freshly extracted .exe is frequently held open by
+      // Defender/indexer for a moment (EBUSY/EPERM on immediate copy).
       const tempTarget = `${targetBinaryPath}.part-${String(Date.now())}`
-      copyFileSync(foundBinary, tempTarget)
+      withFsLockRetry(() => copyFileSync(foundBinary, tempTarget), `copy extracted "${binName}"`)
       if (!isWindows) {
-        chmodSync(tempTarget, 0o755)
+        withFsLockRetry(() => chmodSync(tempTarget, 0o755), `chmod temp ${binName}`)
       }
       try {
-        renameSync(tempTarget, targetBinaryPath)
+        withFsLockRetry(() => renameSync(tempTarget, targetBinaryPath), `rename temp ${binName} into place`)
       } catch {
-        copyFileSync(tempTarget, targetBinaryPath)
-        try { rmSync(tempTarget, { force: true }) } catch {}
+        // Cross-device rename or target locked (e.g. daemon running): copy-in-place fallback
+        withFsLockRetry(() => copyFileSync(tempTarget, targetBinaryPath), `copy temp ${binName} into place`)
+        try { withFsLockRetry(() => rmSync(tempTarget, { force: true }), `remove temp ${binName}`, 2000) } catch {}
       }
 
       if (!isWindows) {
-        chmodSync(targetBinaryPath, 0o755)
+        withFsLockRetry(() => chmodSync(targetBinaryPath, 0o755), `chmod ${binName}`)
       }
 
       resolvedMoliCache.set('', targetBinaryPath)
       console.info(`[dsh-web-fetch-moli] successfully installed Moli binary to ${targetBinaryPath}`)
       return targetBinaryPath
     } finally {
-      try { rmSync(tempArchive, { force: true }) } catch {}
-      try { rmSync(tempExtractDir, { recursive: true, force: true }) } catch {}
+      try { withFsLockRetry(() => rmSync(tempArchive, { force: true }), 'remove downloaded archive', 2000) } catch {}
+      try { withFsLockRetry(() => rmSync(tempExtractDir, { recursive: true, force: true }), 'remove extract dir', 2000) } catch {}
     }
   })().finally(() => {
     inFlightDownloads.delete(destDir)

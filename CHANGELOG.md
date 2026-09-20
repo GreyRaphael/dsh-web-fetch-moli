@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.1] - 2026-09-20
 
+### Fixed
+
+- **修复 Windows 上二进制安装偶发 `EBUSY` 失败（CI windows-latest 复现）**:
+  - 新增 `withFsLockRetry` 同步重试助手：对 `EBUSY`/`EPERM`/`EACCES` 等 Windows 瞬态文件锁（Defender/索引服务对新解压 `.exe` 的短暂独占扫描）执行指数退避重试（150ms 起步、2s 封顶、默认 ~10s 总预算，通过 `Atomics.wait` 实现同步上下文休眠）。
+  - `downloadLatestMoliBinary` 安装路径的 `copyFileSync`/`chmodSync`/`renameSync`/`rmSync`（含降级 copy-in-place 兜底与 finally 清理）全部纳入重试保护；非锁错误（如 `ENOENT`）保持立即抛出不被掩盖。
+  - 新增 3 项单元测试覆盖：重试至成功、非瞬态错误直通、超预算后带上下文放弃。
+
 ### Changed
 
 - **Moli 二进制上游切换至 `GreyRaphael/moli` fork（性能增强版）**:
@@ -20,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Verified
 
 - 本地缓存的 moli 二进制已升级至 fork 的 **v1.1.8**（原 1.1.7）。
-- 测试套件 13 个文件 134 项测试全部通过（含真实 moli 守护进程集成测试）。
+- 测试套件 13 个文件 137 项测试全部通过（含真实 moli 守护进程集成测试）。
 - 端到端验证：`moli serve` CDP 守护进程就绪、健康检查通过、页面渲染（example.com 返回 200）与去噪 Markdown 输出正常。
 
 ## [0.4.0] - 2026-09-17

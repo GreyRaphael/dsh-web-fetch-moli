@@ -10,6 +10,7 @@ import {
   resolveCdpBackend,
   resolveMoliBinary,
   syncLatestMoliOnPluginUpdate,
+  withFsLockRetry,
 } from '../src/moli-resolve.ts'
 
 describe('moli-resolve', () => {
@@ -93,6 +94,48 @@ describe('moli-resolve', () => {
     expect(chromium).toBeDefined()
     expect(typeof chromium.connectOverCDP).toBe('function')
     expect(source).toContain('CDP')
+  })
+
+  it('withFsLockRetry retries transient EBUSY/EPERM locks until success', () => {
+    let calls = 0
+    const result = withFsLockRetry(() => {
+      calls++
+      if (calls < 3) {
+        const err = new Error('resource busy or locked') as NodeJS.ErrnoException
+        err.code = 'EBUSY'
+        throw err
+      }
+      return 'ok'
+    }, 'test op', 5000)
+    expect(result).toBe('ok')
+    expect(calls).toBe(3)
+  })
+
+  it('withFsLockRetry rethrows non-transient errors immediately', () => {
+    let calls = 0
+    expect(() =>
+      withFsLockRetry(() => {
+        calls++
+        const err = new Error('no such file') as NodeJS.ErrnoException
+        err.code = 'ENOENT'
+        throw err
+      }, 'test op', 5000),
+    ).toThrow('no such file')
+    // no retries: single call, error propagates untouched
+    expect(calls).toBe(1)
+  })
+
+  it('withFsLockRetry gives up after the retry budget with a contextual error', () => {
+    const t0 = Date.now()
+    expect(() =>
+      withFsLockRetry(() => {
+        const err = new Error('resource busy or locked') as NodeJS.ErrnoException
+        err.code = 'EPERM'
+        throw err
+      }, 'persistently locked op', 700),
+    ).toThrow('persistently locked op')
+    // waited at least the budget before giving up
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(600)
   })
 })
 
