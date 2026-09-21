@@ -91,7 +91,7 @@ export interface Config {
   challengeRetries?: number
   /**
    * Total deadline budget (ms) for a single fetch operation.
-   * Aligns with `tool-web`'s `fetchTimeoutMs` (default: 60,000ms).
+   * Defaults to 90,000ms when not configured.
    */
   timeoutMs?: number
   /**

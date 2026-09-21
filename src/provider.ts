@@ -77,20 +77,28 @@ class Deadline {
   readonly signal: AbortSignal
   private readonly controller = new AbortController()
   private readonly expiresAt: number
+  private readonly timer: NodeJS.Timeout
+  private readonly outer?: AbortSignal
+  private readonly onOuterAbort: () => void
+  private readonly onAbort: () => void
   private timedOut = false
+  private disposed = false
 
   constructor(outer: AbortSignal | undefined, timeoutMs: number) {
     this.signal = this.controller.signal
+    this.outer = outer
     this.expiresAt = Date.now() + timeoutMs
-    const timer = setTimeout(() => {
+    this.timer = setTimeout(() => {
       this.timedOut = true
       this.controller.abort(new Error('moli fetch deadline'))
     }, timeoutMs)
+    this.onOuterAbort = () => { this.controller.abort(outer?.reason) }
+    this.onAbort = () => { clearTimeout(this.timer) }
     if (outer !== undefined) {
       if (outer.aborted) this.controller.abort(outer.reason)
-      else outer.addEventListener('abort', () => { this.controller.abort(outer.reason) }, { once: true })
+      else outer.addEventListener('abort', this.onOuterAbort, { once: true })
     }
-    this.signal.addEventListener('abort', () => { clearTimeout(timer) }, { once: true })
+    this.signal.addEventListener('abort', this.onAbort, { once: true })
   }
 
   get isTimeout(): boolean {
@@ -99,6 +107,14 @@ class Deadline {
 
   remainingMs(): number {
     return Math.max(1, this.expiresAt - Date.now())
+  }
+
+  dispose(): void {
+    if (this.disposed) return
+    this.disposed = true
+    clearTimeout(this.timer)
+    this.outer?.removeEventListener('abort', this.onOuterAbort)
+    this.signal.removeEventListener('abort', this.onAbort)
   }
 }
 
@@ -161,8 +177,7 @@ class Semaphore {
     // handoff: `active` grows by 1 per queued release until every slot is a
     // phantom and later fetches queue-timeout forever.
     this.active = Math.max(0, this.active - 1)
-    const next = this.queue.shift()
-    if (next !== undefined) next.start()
+    this.drain()
   }
 
   private drain(): void {
@@ -261,12 +276,13 @@ export class MoliFetchProvider implements WebFetchProvider {
     const timeoutBudget = effectiveTimeoutMs(config)
     const deadline = new Deadline(signal, timeoutBudget)
 
-    // Unified single concurrency gatekeeper across all backends (cdp, local)
-    this.semaphore.resize(effectiveMaxConcurrency(config))
-    await this.semaphore.acquire(deadline.signal, Math.min(QUEUE_TIMEOUT_MS, deadline.remainingMs()))
-    let acquired = true
-
+    let acquired = false
     try {
+      // Unified single concurrency gatekeeper across all backends (cdp, local)
+      this.semaphore.resize(effectiveMaxConcurrency(config))
+      await this.semaphore.acquire(deadline.signal, Math.min(QUEUE_TIMEOUT_MS, deadline.remainingMs()))
+      acquired = true
+
       // CDP mode execution (local daemon or remote endpoint)
       let session: MoliBrowserSession | undefined
       try {
@@ -287,6 +303,7 @@ export class MoliFetchProvider implements WebFetchProvider {
       throw translateError(error, deadline)
     } finally {
       if (acquired) this.semaphore.release()
+      deadline.dispose()
     }
   }
 

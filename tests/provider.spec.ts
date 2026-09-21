@@ -232,8 +232,10 @@ class FakeProvider extends MoliFetchProvider {
 class GatedProvider extends MoliFetchProvider {
   readonly started: number[] = []
   private gate: Promise<void> = Promise.resolve()
+  private readonly mutableConfig: Partial<ResolvedConfig>
 
   constructor(config: Partial<ResolvedConfig>) {
+    const mutableConfig = { ...config }
     super(() => ({
       backend: 'local',
       moliPath: '',
@@ -245,8 +247,13 @@ class GatedProvider extends MoliFetchProvider {
       maxConcurrency: 4,
       challengeWaitMs: 0,
       challengeRetries: 0,
-      ...config,
+      ...mutableConfig,
     }))
+    this.mutableConfig = mutableConfig
+  }
+
+  setMaxConcurrency(limit: number): void {
+    this.mutableConfig.maxConcurrency = limit
   }
 
   /** Make every subsequent `openSession` await the given promise. */
@@ -403,6 +410,20 @@ describe('MoliFetchProvider', () => {
     expect(code).toBe('WEB_PROVIDER_ERROR')
   })
 
+  it('removes the caller abort listener after a successful fetch', async () => {
+    const controller = new AbortController()
+    const add = vi.spyOn(controller.signal, 'addEventListener')
+    const remove = vi.spyOn(controller.signal, 'removeEventListener')
+
+    await new FakeProvider().fetch({ url: 'https://example.com/x' }, controller.signal)
+
+    const abortAdds = add.mock.calls.filter(([type]) => type === 'abort')
+    const abortRemoves = remove.mock.calls.filter(([type]) => type === 'abort')
+    expect(abortAdds).toHaveLength(1)
+    expect(abortRemoves).toHaveLength(1)
+    expect(abortRemoves[0]?.[1]).toBe(abortAdds[0]?.[1])
+  })
+
   it('translates a pre-aborted signal to WEB_ABORTED', async () => {
     const controller = new AbortController()
     controller.abort()
@@ -446,6 +467,56 @@ describe('MoliFetchProvider concurrency queue', () => {
     controllers.forEach(controller => controller.abort())
     await flush()
     void fetches
+  })
+
+  it('honors a lower concurrency limit before promoting queued fetches', async () => {
+    const config: Partial<ResolvedConfig> = { maxConcurrency: 3 }
+    const releases: Array<() => void> = []
+    class ResizableProvider extends MoliFetchProvider {
+      readonly started: number[] = []
+
+      constructor() {
+        super(() => ({
+          backend: 'local', moliPath: '', cdpEndpoint: '', shareBrowserContext: true,
+          bypassCsp: true, autoScrollSentinel: true, denoise: true,
+          challengeWaitMs: 0, challengeRetries: 0, ...config,
+        }))
+      }
+
+      protected async openSession(): Promise<MoliBrowserSession> {
+        this.started.push(this.started.length)
+        await new Promise<void>(resolve => { releases.push(resolve) })
+        return fakeSession({})
+      }
+    }
+
+    const provider = new ResizableProvider()
+    const fetches = Array.from({ length: 3 }, (_, i) =>
+      provider.fetch({ url: `https://example.com/holder-${String(i)}` }))
+    await flush()
+    expect(provider.started).toEqual([0, 1, 2])
+
+    const queued = provider.fetch({ url: 'https://example.com/queued' })
+    await flush()
+    config.maxConcurrency = 1
+    const secondQueued = provider.fetch({ url: 'https://example.com/queued-after-resize' })
+    await flush()
+
+    releases[0]?.()
+    await flush()
+    expect(provider.started).toEqual([0, 1, 2])
+    releases[1]?.()
+    await flush()
+    expect(provider.started).toEqual([0, 1, 2])
+
+    releases[2]?.()
+    await flush()
+    expect(provider.started).toEqual([0, 1, 2, 3])
+    releases[3]?.()
+    await flush()
+    expect(provider.started).toEqual([0, 1, 2, 3, 4])
+    releases[4]?.()
+    await Promise.all([...fetches, queued, secondQueued])
   })
 
   it('fails a queued fetch fast with a retry hint instead of hanging until abort', async () => {
