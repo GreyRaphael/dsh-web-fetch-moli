@@ -1,6 +1,6 @@
 /**
  * Moli `WebFetchProvider`: renders pages using Moli (ultra-lightweight Rust headless browser)
- * via managed local CDP daemon, direct one-shot CLI, or remote CDP endpoint.
+ * via a managed local CDP daemon or a remote CDP endpoint.
  *
  * Provides:
  * - Ultra-lightweight footprint (~60MB RAM per daemon, compared to ~1GB for standard Chromium).
@@ -155,12 +155,14 @@ class Semaphore {
   }
 
   release(): void {
-    const next = this.active <= this.limit ? this.queue.shift() : undefined
-    if (next === undefined) {
-      this.active = Math.max(0, this.active - 1)
-      return
-    }
-    next.start()
+    // The holder always gives its slot back first; the promotion below then
+    // hands that freed slot to the next waiter. Doing it in the other order
+    // (start the waiter, never decrementing the holder) double-counts every
+    // handoff: `active` grows by 1 per queued release until every slot is a
+    // phantom and later fetches queue-timeout forever.
+    this.active = Math.max(0, this.active - 1)
+    const next = this.queue.shift()
+    if (next !== undefined) next.start()
   }
 
   private drain(): void {
@@ -259,7 +261,7 @@ export class MoliFetchProvider implements WebFetchProvider {
     const timeoutBudget = effectiveTimeoutMs(config)
     const deadline = new Deadline(signal, timeoutBudget)
 
-    // Unified single concurrency gatekeeper across all backends (cdp, local, cli)
+    // Unified single concurrency gatekeeper across all backends (cdp, local)
     this.semaphore.resize(effectiveMaxConcurrency(config))
     await this.semaphore.acquire(deadline.signal, Math.min(QUEUE_TIMEOUT_MS, deadline.remainingMs()))
     let acquired = true

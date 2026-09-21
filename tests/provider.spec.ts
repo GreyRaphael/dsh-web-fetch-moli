@@ -498,6 +498,49 @@ describe('MoliFetchProvider concurrency queue', () => {
     expect((laterFailure as WebError).message).toContain('rendering slots stayed busy')
     expect(provider.started).toEqual([0])
   })
+
+  /**
+   * Regression (slot leak): a queued handoff used to promote the next waiter
+   * WITHOUT giving the finishing holder's slot back, so `active` grew by one
+   * per handoff until every slot was a phantom and later fetches
+   * queue-timed-out forever. This test runs the full release → handoff →
+   * complete cycle many times over and then demands a fresh fetch start
+   * immediately instead of queue-timing.
+   */
+  it('completing queued handoffs never leak slots (release promotes and decrements)', { timeout: 30_000 }, async () => {
+    const sleep = (ms: number): Promise<void> => new Promise(resolve => { setTimeout(resolve, ms) })
+
+    /** A provider whose sessions complete after a per-index delay, so fetches queue and then hand off. */
+    class TimedProvider extends FakeProvider {
+      private index = 0
+
+      constructor(config: Partial<ResolvedConfig>, private readonly delayMs: (index: number) => number) {
+        super(config)
+      }
+
+      protected async openSession(): Promise<MoliBrowserSession> {
+        const index = this.index++
+        const session = await super.openSession()
+        // Delay only the session body: the semaphore slot is held for the
+        // whole fetch, so the queue drains through staggered completions.
+        await sleep(this.delayMs(index))
+        return session
+      }
+    }
+
+    const provider = new TimedProvider({ maxConcurrency: 3, timeoutMs: 25_000 }, index => 5 + (index % 4) * 3)
+    const results = await Promise.allSettled(Array.from({ length: 12 }, (_, i) =>
+      provider.fetch({ url: `https://example.com/handoff-${String(i)}` })))
+    expect(results.every(result => result.status === 'fulfilled')).toBe(true)
+
+    // All slots returned: a fresh fetch must start at once, not after the
+    // 20s queue patience — prove it by finishing well inside that budget.
+    const started = Date.now()
+    const extra = await provider.fetch({ url: 'https://example.com/extra' })
+    expect(extra.statusCode).toBe(200)
+    expect(Date.now() - started).toBeLessThan(10_000)
+    await provider.dispose()
+  })
 })
 
 describe('MoliFetchProvider CDP backend', () => {

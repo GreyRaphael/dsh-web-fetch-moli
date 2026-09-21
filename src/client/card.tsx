@@ -1,6 +1,6 @@
 /**
  * The Moli plugin configuration card:
- * Streamlined backend selection (Local Moli daemon, Remote CDP, One-shot CLI),
+ * Streamlined backend selection (Local Moli daemon, Remote CDP),
  * with non-redundant feature toggles (CSP bypass, infinite-scroll sentinels,
  * browser context isolation, denoise pipeline) and resource controls.
  *

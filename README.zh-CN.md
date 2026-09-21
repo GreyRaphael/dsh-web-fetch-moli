@@ -75,9 +75,10 @@ dsh plugin --profile web add dsh-web-fetch-moli
 | `autoScrollSentinel` | `true` | 是否自动触发 `IntersectionObserver` 哨兵，加载瀑布流无限滚动卡片。 |
 | `shareBrowserContext` | `true` | 是否复用浏览器上下文（在 `cdp` 模式生效）；本地模式下始终使用隔离上下文防止污染。 |
 | `denoise` | `true` | 启用 LinkeDOM + Readability + mdream 降噪与 LLM 优化 Markdown 转换。 |
+| `timeoutMs` | `90000` | 单次抓取的总超时预算（毫秒）；重型微前端页面需要多轮排版与滚动。bundle 层出厂 60000，schema 默认 90000。 |
 | `maxConcurrency` | （自动） | 最大并发抓取数（自动：本地 20，远端 50）。 |
-| `challengeWaitMs` | `15000` | Cloudflare 人机验证有界等待上限（毫秒；0 为关闭）。 |
-| `challengeRetries` | `1` | 验证超时后的同页面重试次数。 |
+| `challengeWaitMs` | `5000` | Cloudflare 人机验证有界等待上限（毫秒；0 为关闭）。 |
+| `challengeRetries` | `0` | 验证超时后的同页面重试次数。 |
 
 ## 开源协议
 

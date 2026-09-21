@@ -166,9 +166,9 @@ export function getPluginPackageVersion(): string {
     const pkgUrl = new URL('../package.json', import.meta.url)
     const content = readFileSync(pkgUrl, 'utf-8')
     const parsed = JSON.parse(content) as { version?: string }
-    return parsed.version ?? '0.4.1'
+    return parsed.version ?? '0.4.2'
   } catch {
-    return '0.4.1'
+    return '0.4.2'
   }
 }
 

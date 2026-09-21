@@ -1,7 +1,7 @@
 /**
  * Structural types for Moli web-fetch provider:
  * - CDP structural interfaces for driving Moli over Chrome DevTools Protocol.
- * - Moli-specific execution modes, sessions, and CLI runner interfaces.
+ * - Moli-specific execution modes and sessions.
  *
  * Declared locally without hard-depending on runtime protocol packages so that
  * the plugin remains dynamically adaptive to bundled drivers and lightweight fakes.

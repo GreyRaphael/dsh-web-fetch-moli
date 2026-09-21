@@ -73,9 +73,10 @@ The settings card (设置 → 插件 → 插件配置 → *Moli 网页爬取*) c
 | `autoScrollSentinel` | `true` | Programmatically triggers `IntersectionObserver` load-more sentinels for structure-first geometry. |
 | `shareBrowserContext` | `true` | Preserves cookies and localStorage across fetches in `cdp` mode. Unchecked (and always in `local` mode): fresh isolated context per fetch. |
 | `denoise` | `true` | Runs LinkeDOM + Readability + mdream to strip ads, navbars, and footers before LLM-optimized Markdown conversion. |
+| `timeoutMs` | `90000` | Total deadline budget (ms) for one fetch; heavy micro-frontend pages may need several layout + scroll rounds. The bundled layer ships 60000, the schema default is 90000. |
 | `maxConcurrency` | *(auto)* | Max concurrent rendering slots (auto: local 20, remote CDP 50). |
-| `challengeWaitMs` | `15000` | Bounded wait (ms) for Cloudflare verification to clear naturally. |
-| `challengeRetries` | `1` | Same-page retry attempts after challenge wait. |
+| `challengeWaitMs` | `5000` | Bounded wait (ms) for Cloudflare verification to clear naturally (`0` disables). |
+| `challengeRetries` | `0` | Same-page retry attempts after challenge wait. |
 
 ## License
 

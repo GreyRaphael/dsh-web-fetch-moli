@@ -5,6 +5,27 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-09-21
+
+### Fixed
+
+- **修复 `Semaphore.release()` 排队交接路径的槽位泄漏（严重并发缺陷）**:
+  - 旧实现：`release()` 在队列非空时只调用队首 waiter 的 `start()`（内部 `active++`），而跳过当前持有者的 `active--`，每次"释放→交接"净增 1 个幽灵槽位。
+  - 触发条件：并发 fetch 排队后逐个完成（模型 fan-out 多个 `web_fetch` 即触发），`active` 单调递增直至并发额度被幽灵槽位占满，后续请求全部 20s 排队超时（`WEB_FETCH_TIMEOUT`"rendering slots stayed busy"）。
+  - 修复：`release()` 先 `active = Math.max(0, active - 1)` 归还持有者槽位，再从队首 promote 下一个 waiter；`drain()` 语义不变。
+  - 新增回归测试 `completing queued handoffs never leak slots`：12 个会完成的 fetch 走 `maxConcurrency: 3` 的排队交接，验证全部 fulfilled 且后续新 fetch 立即启动（修复前该测试 20s 排队超时失败，修复后通过）。
+  - 根因说明：既有并发测试全部用永久阻塞的 `openSession`（排队者只测 abort/超时失败路径），从未覆盖"释放→交接→完成"的成功路径；真实 Moli 集成测试的 burst 用例（6 并发、limit 10）从不排队，因此泄漏一直未被发现。
+
+### Changed
+
+- **文档与配置默认值三方对齐（`challengeWaitMs` / `challengeRetries` / `timeoutMs`）**:
+  - `challengeWaitMs` 默认值更正为 `5000`（0.3.x 系列已由 commit c0c640e 从 15000 调低，但文档未同步）：`README.md`、`README.zh-CN.md` 配置表格与 `src/client/locales.ts` 中英文占位符（`(default: 15000)` → `(default: 5000)`）全部对齐 `src/config.ts` 的 `DEFAULT_CHALLENGE_WAIT_MS = 5_000`。
+  - `challengeRetries` 默认值更正为 `0`（同上，文档原写 `1`）。
+  - `timeoutMs` 默认值更正为 `90000`（`DEFAULT_TIMEOUT_MS`，文档原写 60000）：README 表格与 locale 占位符同步更正并注明"bundle 层出厂 60000，schema 默认 90000"；locale hint 不再误述"对齐 tool-web fetchTimeoutMs (默认 60000ms)"。
+  - 配置表格补齐缺失的 `timeoutMs` 行（README 中英文双份）。
+  - `maxConcurrency` 的 hint/占位符移除已废弃的 CLI 模式（"CLI 8"），仅保留 local 20 / CDP 50。
+  - 清理源码注释中残留的 CLI 模式表述（`src/config.ts`、`src/provider.ts`、`src/types.ts`、`src/client/card.tsx` 的模块级/字段级注释）——CLI 模式已于 v0.4.0 移除。
+
 ## [0.4.1] - 2026-09-20
 
 ### Fixed

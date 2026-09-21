@@ -53,7 +53,7 @@ export type { CdpContextMode, MoliBackend } from './types.ts'
 
 /** Plugin config: everything optional — the schema fills the defaults. */
 export interface Config {
-  /** Backend selector: local Moli CDP daemon, remote CDP endpoint, or one-shot CLI. */
+  /** Backend selector: local Moli CDP daemon or remote CDP endpoint. */
   backend?: MoliBackend
   /**
    * Path to the Moli executable. Empty = auto-discover `moli` on `$PATH` or standard directories.
@@ -96,7 +96,7 @@ export interface Config {
   timeoutMs?: number
   /**
    * How many fetches may render at once.
-   * Blank = backend default (20 for local, 50 for remote CDP, 8 for CLI).
+   * Blank = backend default (20 for local, 50 for remote CDP).
    */
   maxConcurrency?: number
 }
