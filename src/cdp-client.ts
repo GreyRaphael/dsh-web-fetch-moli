@@ -30,6 +30,15 @@ interface PendingRequest {
   timer: NodeJS.Timeout
 }
 
+/** A valid CDP error response: the command failed, but the peer answered. */
+class CdpProtocolError extends Error {}
+
+/** How often the liveness heartbeat round-trips a cheap CDP command. */
+const HEARTBEAT_INTERVAL_MS = 15_000
+
+/** Consecutive unanswered heartbeats before a half-open connection is declared dead. */
+const HEARTBEAT_MAX_MISSES = 2
+
 /**
  * Connect to a browser over CDP via native WebSocket.
  *
@@ -79,6 +88,9 @@ export class NativeCdpBrowser implements CdpBrowser {
   private readonly targetToPage = new Map<string, NativeCdpPage>()
   private readonly defaultCtx: NativeCdpContext
   private isClosed = false
+  private heartbeatTimer: NodeJS.Timeout | null = null
+  private heartbeatMisses = 0
+  private heartbeatPending = false
 
   constructor(
     private readonly wsUrl: string,
@@ -128,6 +140,7 @@ export class NativeCdpBrowser implements CdpBrowser {
 
     // Enable Target domain on browser level to discover popups and targets
     await this.send('Target.setDiscoverTargets', { discover: true }).catch(() => {})
+    this.startHeartbeat()
   }
 
   async send(method: string, params: Record<string, unknown> = {}, sessionId?: string): Promise<unknown> {
@@ -172,7 +185,7 @@ export class NativeCdpBrowser implements CdpBrowser {
       const { resolve, reject, timer } = this.pending.get(msg.id)!
       clearTimeout(timer)
       this.pending.delete(msg.id)
-      if (msg.error) reject(new Error(msg.error.message))
+      if (msg.error) reject(new CdpProtocolError(msg.error.message))
       else resolve(msg.result)
       return
     }
@@ -210,8 +223,66 @@ export class NativeCdpBrowser implements CdpBrowser {
     }
   }
 
+  /**
+   * Application-level liveness heartbeat: a silent half-open connection (NAT
+   * timeout, idle proxy drop, wedged daemon) never delivers onclose/onerror,
+   * so isConnected() would report a live connection while every command burns
+   * its full 60s timeout. Each tick sends a cheap CDP round-trip; a probe
+   * still unanswered by the next tick counts as a miss, and HEARTBEAT_MAX_MISSES
+   * consecutive misses declare the connection dead — without waiting for the
+   * command timeout to expire.
+   */
+  private startHeartbeat(): void {
+    if (this.heartbeatTimer !== null) return
+    this.heartbeatTimer = setInterval(() => this.heartbeatTick(), HEARTBEAT_INTERVAL_MS)
+    this.heartbeatTimer.unref?.()
+  }
+
+  private heartbeatTick(): void {
+    if (this.isClosed) {
+      this.stopHeartbeat()
+      return
+    }
+    if (this.heartbeatPending) {
+      this.heartbeatMisses++
+      if (this.heartbeatMisses >= HEARTBEAT_MAX_MISSES) {
+        this.handleDisconnect()
+        return
+      }
+    } else {
+      this.heartbeatMisses = 0
+    }
+    this.heartbeatPending = true
+    this.send('Target.getTargets', {}).then(
+      () => {
+        // Any answer — result or CDP-level error — proves the peer is alive.
+        this.heartbeatPending = false
+      },
+      (error: unknown) => {
+        // A CDP-level error is still a response from a live peer. Transport
+        // close and command timeout errors remain unanswered and count as misses.
+        if (error instanceof CdpProtocolError && !this.isClosed) {
+          this.heartbeatPending = false
+          this.heartbeatMisses = 0
+        }
+      },
+    )
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer !== null) {
+      clearInterval(this.heartbeatTimer)
+      this.heartbeatTimer = null
+    }
+    this.heartbeatPending = false
+    this.heartbeatMisses = 0
+  }
+
   private handleDisconnect(): void {
+    if (this.isClosed) return
     this.isClosed = true
+    this.stopHeartbeat()
+    try { this.ws.close() } catch {}
     for (const [, { reject, timer }] of this.pending) {
       clearTimeout(timer)
       reject(new Error('Target closed'))
@@ -233,11 +304,7 @@ export class NativeCdpBrowser implements CdpBrowser {
   }
 
   async close(): Promise<void> {
-    if (this.isClosed) return
-    this.isClosed = true
-    try {
-      this.ws.close()
-    } catch {}
+    this.handleDisconnect()
   }
 }
 

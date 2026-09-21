@@ -60,16 +60,6 @@ export async function setupPageHooks(
   await sendCdp(page, 'Network.setBypassServiceWorker', { bypass: true })
 }
 
-/**
- * Send CDP Page.setBypassCSP to globally bypass CSP restrictions in Moli.
- *
- * @param page - CDP page.
- * @param enabled - whether CSP bypass is enabled (defaults to true).
- */
-export async function setBypassCsp(page: CdpPage, enabled = true): Promise<void> {
-  await sendCdp(page, 'Page.setBypassCSP', { enabled })
-}
-
 export const MICRO_CLIP_VIEWPORT = { x: 0, y: 0, width: 1, height: 1, scale: 1 } as const
 
 /**

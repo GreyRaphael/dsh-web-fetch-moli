@@ -37,7 +37,6 @@ export {
   forceLayoutMaterialization,
   MICRO_CLIP_VIEWPORT,
   scrollIntoViewNative,
-  setBypassCsp,
   setupPageHooks,
 } from './hooks.ts'
 export type { NativeScrollResult } from './hooks.ts'

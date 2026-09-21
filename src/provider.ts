@@ -316,10 +316,16 @@ export class MoliFetchProvider implements WebFetchProvider {
 
   /**
    * Graceful cleanup of daemon processes and shared CDP connections.
+   *
+   * moliProcess.dispose() runs first: it flips the manager's disposed flag, so an
+   * in-flight fetch that is still inside openSession cannot spawn a fresh
+   * daemon AFTER cleanup completes (a daemon nobody would ever stop again —
+   * the orphan leak). cdpPool.dispose() then tears down connections knowing
+   * the daemon is going away.
    */
   async dispose(): Promise<void> {
+    await this.moliProcess.dispose()
     await this.cdpPool.dispose()
-    await this.moliProcess.stop()
   }
 
   async fetch(request: WebFetchRequest, signal?: AbortSignal): Promise<WebFetchResult> {

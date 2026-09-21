@@ -27,11 +27,12 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs'
-import { execFileSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
+import type { ExecFileOptions } from 'node:child_process'
 import type { CdpChromium } from './types.ts'
 import { connectCdp } from './cdp-client.ts'
 
@@ -116,46 +117,59 @@ const TRANSIENT_LOCK_CODES = new Set(['EBUSY', 'EPERM', 'EACCES'])
 const LOCK_RETRY_TIMEOUT_MS = 10_000
 
 /**
- * Run a synchronous filesystem operation, retrying on transient Windows file locks.
+ * Promisified `execFile` that never blocks the event loop. All child-process
+ * invocations go through this so a slow download or a wedged binary can never
+ * freeze the host's concurrent fetches.
+ */
+function runCommand(command: string, args: string[], options: { timeout: number } & Omit<ExecFileOptions, 'timeout'> = { timeout: 5_000 }): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, { encoding: 'utf-8', ...options }, (err, stdout) => {
+      if (err) reject(err)
+      else resolve(stdout as string)
+    })
+  })
+}
+
+/**
+ * Run a filesystem operation, retrying on transient Windows file locks.
  *
  * On Windows a freshly extracted/renamed executable is routinely held open
  * (exclusive lock) for a short while by Defender or the search indexer, making
  * an immediate `copyFileSync` fail with `EBUSY`. Retrying with exponential
- * backoff rides out the scan window instead of failing the install.
+ * backoff rides out the scan window instead of failing the install — with
+ * real-timer sleeps, so the event loop keeps serving requests while the lock
+ * rides out.
  *
- * @param op - zero-arg synchronous operation to run.
+ * @param op - zero-arg (synchronous fs) operation to run.
  * @param label - description used in the final error message.
  * @param timeoutMs - total retry budget (default ~10s).
  */
-export function withFsLockRetry<T>(op: () => T, label: string, timeoutMs = LOCK_RETRY_TIMEOUT_MS): T {
+export async function withFsLockRetry<T>(op: () => Promise<T> | T, label: string, timeoutMs = LOCK_RETRY_TIMEOUT_MS): Promise<T> {
   const deadline = Date.now() + timeoutMs
   let delay = 150
   let attempt = 0
-  // ~63 retries at 150ms growth cap; bounded so it cannot spin unbounded
   for (;;) {
     attempt++
     try {
-      return op()
+      return await op()
     } catch (err: unknown) {
       const code = (err as NodeJS.ErrnoException)?.code
       if (code === undefined || !TRANSIENT_LOCK_CODES.has(code) || Date.now() >= deadline) {
         if (TRANSIENT_LOCK_CODES.has(String(code)) && attempt > 1) {
-          // surface how long we waited before giving up
           const wrapped = new Error(`${label} failed after ${attempt} attempts (${code}): ${String((err as Error)?.message ?? err)}`)
           ;(wrapped as NodeJS.ErrnoException).cause = err
           throw wrapped
         }
         throw err
       }
-      // transient lock: back off and retry
-      const wakeup = Date.now() + delay
-      while (Date.now() < wakeup) {
-        // busy-ish sleep in sync context: Atomics.wait on a scratch buffer
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.min(delay, 200))
-      }
+      await sleep(Math.min(delay, 200))
       delay = Math.min(delay * 2, 2000)
     }
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => { setTimeout(resolve, ms) })
 }
 
 /**
@@ -173,19 +187,16 @@ export function getPluginPackageVersion(): string {
 }
 
 /**
- * Read the version string of a local Moli binary by executing `moli --version`.
+ * Read the version string of a local Moli binary by executing `moli --version`
+ * — asynchronously, so a wedged binary can never block the event loop.
  *
  * @param binaryPath - absolute path to executable.
  * @returns semver string (e.g. '1.1.5'), or null if unexecutable/unparseable.
  */
-export function getLocalMoliVersion(binaryPath: string): string | null {
+export async function getLocalMoliVersion(binaryPath: string): Promise<string | null> {
   try {
     if (!isExecutableFile(binaryPath)) return null
-    const output = execFileSync(binaryPath, ['--version'], {
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 3000,
-    })
+    const output = await runCommand(binaryPath, ['--version'], { timeout: 3_000 })
     const match = output.match(/\b(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\b/)
     return match?.[1] ?? null
   } catch {
@@ -197,20 +208,18 @@ export function getLocalMoliVersion(binaryPath: string): string | null {
  * Query the latest official Moli release tag from GitHub Releases.
  *
  * Tries curl first (respecting proxy environment variables like http_proxy/https_proxy),
- * with a fallback to native fetch with a strict 6s timeout.
+ * with a fallback to native fetch with a strict 6s timeout. Both paths are
+ * async — the event loop stays responsive while the network answers.
  *
  * @returns latest semver string (e.g. '1.1.6'), or null if network is offline.
  */
 export async function fetchLatestMoliReleaseTag(): Promise<string | null> {
   // 1. Try curl (fast, respects system & shell proxy envs)
   try {
-    const stdout = execFileSync(
+    const stdout = await runCommand(
       'curl',
       ['-sI', '--connect-timeout', '5', '--max-time', '8', MOLI_LATEST_RELEASE_URL],
-      {
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe'],
-      },
+      { timeout: 9_000 },
     )
     const match = stdout.match(/location:.*tag\/v?([0-9A-Za-z.-]+)/i)
     if (match?.[1]) {
@@ -278,7 +287,7 @@ export async function syncLatestMoliOnPluginUpdate(destinationDir?: string): Pro
   try {
     const [latestReleaseVer, localVer] = await Promise.all([
       fetchLatestMoliReleaseTag(),
-      Promise.resolve(getLocalMoliVersion(targetBinaryPath)),
+      getLocalMoliVersion(targetBinaryPath),
     ])
 
     if (latestReleaseVer !== null) {
@@ -439,10 +448,10 @@ export async function downloadLatestMoliBinary(
     try {
       let downloadedViaCurl = false
       try {
-        execFileSync(
+        await runCommand(
           'curl',
           ['-fL', '--connect-timeout', '15', '--max-time', '180', '-o', tempArchive, downloadUrl],
-          { stdio: 'pipe' },
+          { timeout: 190_000 },
         )
         if (existsSync(tempArchive) && statSync(tempArchive).size > 1000) {
           downloadedViaCurl = true
@@ -452,7 +461,12 @@ export async function downloadLatestMoliBinary(
       }
 
       if (!downloadedViaCurl) {
-        const response = await fetch(downloadUrl, { redirect: 'follow' })
+        const response = await fetch(downloadUrl, {
+          redirect: 'follow',
+          // Hard ceiling on the streaming download so a wedged transfer cannot
+          // pin the install forever; a slow link still gets the full window.
+          signal: AbortSignal.timeout(190_000),
+        })
         if (!response.ok) {
           throw new Error(`HTTP ${String(response.status)}: ${response.statusText}`)
         }
@@ -464,22 +478,22 @@ export async function downloadLatestMoliBinary(
 
       if (isZip) {
         try {
-          execFileSync('tar', ['-xf', tempArchive, '-C', tempExtractDir], { stdio: 'pipe' })
+          await runCommand('tar', ['-xf', tempArchive, '-C', tempExtractDir], { timeout: 60_000 })
         } catch {
-          execFileSync(
+          await runCommand(
             'powershell',
             ['-NoProfile', '-Command', `Expand-Archive -Path "${tempArchive}" -DestinationPath "${tempExtractDir}" -Force`],
-            { stdio: 'pipe' },
+            { timeout: 120_000 },
           )
         }
       } else {
         try {
-          execFileSync('tar', ['--no-same-owner', '-m', '-xzf', tempArchive, '-C', tempExtractDir], { stdio: 'pipe' })
+          await runCommand('tar', ['--no-same-owner', '-m', '-xzf', tempArchive, '-C', tempExtractDir], { timeout: 60_000 })
         } catch (tarErr) {
           // Check if binary was extracted despite non-fatal tar warnings (e.g. utime)
           if (!findBinaryRecursively(tempExtractDir, binName)) {
             try {
-              execFileSync('tar', ['-xzf', tempArchive, '-C', tempExtractDir], { stdio: 'pipe' })
+              await runCommand('tar', ['-xzf', tempArchive, '-C', tempExtractDir], { timeout: 60_000 })
             } catch {
               if (!findBinaryRecursively(tempExtractDir, binName)) {
                 throw tarErr
@@ -498,28 +512,28 @@ export async function downloadLatestMoliBinary(
       // Windows locks: a freshly extracted .exe is frequently held open by
       // Defender/indexer for a moment (EBUSY/EPERM on immediate copy).
       const tempTarget = `${targetBinaryPath}.part-${String(Date.now())}`
-      withFsLockRetry(() => copyFileSync(foundBinary, tempTarget), `copy extracted "${binName}"`)
+      await withFsLockRetry(() => copyFileSync(foundBinary, tempTarget), `copy extracted "${binName}"`)
       if (!isWindows) {
-        withFsLockRetry(() => chmodSync(tempTarget, 0o755), `chmod temp ${binName}`)
+        await withFsLockRetry(() => chmodSync(tempTarget, 0o755), `chmod temp ${binName}`)
       }
       try {
-        withFsLockRetry(() => renameSync(tempTarget, targetBinaryPath), `rename temp ${binName} into place`)
+        await withFsLockRetry(() => renameSync(tempTarget, targetBinaryPath), `rename temp ${binName} into place`)
       } catch {
         // Cross-device rename or target locked (e.g. daemon running): copy-in-place fallback
-        withFsLockRetry(() => copyFileSync(tempTarget, targetBinaryPath), `copy temp ${binName} into place`)
-        try { withFsLockRetry(() => rmSync(tempTarget, { force: true }), `remove temp ${binName}`, 2000) } catch {}
+        await withFsLockRetry(() => copyFileSync(tempTarget, targetBinaryPath), `copy temp ${binName} into place`)
+        try { await withFsLockRetry(() => rmSync(tempTarget, { force: true }), `remove temp ${binName}`, 2000) } catch {}
       }
 
       if (!isWindows) {
-        withFsLockRetry(() => chmodSync(targetBinaryPath, 0o755), `chmod ${binName}`)
+        await withFsLockRetry(() => chmodSync(targetBinaryPath, 0o755), `chmod ${binName}`)
       }
 
       resolvedMoliCache.set('', targetBinaryPath)
       console.info(`[dsh-web-fetch-moli] successfully installed Moli binary to ${targetBinaryPath}`)
       return targetBinaryPath
     } finally {
-      try { withFsLockRetry(() => rmSync(tempArchive, { force: true }), 'remove downloaded archive', 2000) } catch {}
-      try { withFsLockRetry(() => rmSync(tempExtractDir, { recursive: true, force: true }), 'remove extract dir', 2000) } catch {}
+      try { await withFsLockRetry(() => rmSync(tempArchive, { force: true }), 'remove downloaded archive', 2000) } catch {}
+      try { await withFsLockRetry(() => rmSync(tempExtractDir, { recursive: true, force: true }), 'remove extract dir', 2000) } catch {}
     }
   })().finally(() => {
     inFlightDownloads.delete(destDir)

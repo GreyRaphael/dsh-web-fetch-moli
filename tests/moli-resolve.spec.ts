@@ -63,7 +63,7 @@ describe('moli-resolve', () => {
 
   it('getLocalMoliVersion inspects binary version string', async () => {
     const bin = await resolveMoliBinary()
-    const ver = getLocalMoliVersion(bin)
+    const ver = await getLocalMoliVersion(bin)
     if (ver !== null) {
       expect(typeof ver).toBe('string')
       expect(ver).toMatch(/^\d+\.\d+\.\d+/)
@@ -96,9 +96,9 @@ describe('moli-resolve', () => {
     expect(source).toContain('CDP')
   })
 
-  it('withFsLockRetry retries transient EBUSY/EPERM locks until success', () => {
+  it('withFsLockRetry retries transient EBUSY/EPERM locks until success', async () => {
     let calls = 0
-    const result = withFsLockRetry(() => {
+    const result = await withFsLockRetry(() => {
       calls++
       if (calls < 3) {
         const err = new Error('resource busy or locked') as NodeJS.ErrnoException
@@ -111,31 +111,55 @@ describe('moli-resolve', () => {
     expect(calls).toBe(3)
   })
 
-  it('withFsLockRetry rethrows non-transient errors immediately', () => {
+  it('withFsLockRetry rethrows non-transient errors immediately', async () => {
     let calls = 0
-    expect(() =>
-      withFsLockRetry(() => {
-        calls++
-        const err = new Error('no such file') as NodeJS.ErrnoException
-        err.code = 'ENOENT'
-        throw err
-      }, 'test op', 5000),
-    ).toThrow('no such file')
+    await expect(withFsLockRetry(() => {
+      calls++
+      const err = new Error('no such file') as NodeJS.ErrnoException
+      err.code = 'ENOENT'
+      throw err
+    }, 'test op', 5000)).rejects.toThrow('no such file')
     // no retries: single call, error propagates untouched
     expect(calls).toBe(1)
   })
 
-  it('withFsLockRetry gives up after the retry budget with a contextual error', () => {
+  it('withFsLockRetry gives up after the retry budget with a contextual error', async () => {
     const t0 = Date.now()
-    expect(() =>
-      withFsLockRetry(() => {
-        const err = new Error('resource busy or locked') as NodeJS.ErrnoException
-        err.code = 'EPERM'
-        throw err
-      }, 'persistently locked op', 700),
-    ).toThrow('persistently locked op')
+    await expect(withFsLockRetry(() => {
+      const err = new Error('resource busy or locked') as NodeJS.ErrnoException
+      err.code = 'EPERM'
+      throw err
+    }, 'persistently locked op', 700)).rejects.toThrow('persistently locked op')
     // waited at least the budget before giving up
     expect(Date.now() - t0).toBeGreaterThanOrEqual(600)
+  })
+
+  it('withFsLockRetry never blocks the event loop while retrying', { timeout: 5_000 }, async () => {
+    let calls = 0
+    let eventLoopServed = false
+    const ticker = setInterval(() => { eventLoopServed = true }, 10)
+    try {
+      const result = await withFsLockRetry(() => {
+        calls++
+        if (calls < 3) {
+          const err = new Error('resource busy or locked') as NodeJS.ErrnoException
+          err.code = 'EBUSY'
+          throw err
+        }
+        return 'ok'
+      }, 'test op', 5_000)
+      expect(result).toBe('ok')
+      expect(calls).toBe(3)
+      // Real-timer sleeps between attempts let timers fire: a synchronous
+      // variant (Atomics.wait) would have starved them completely.
+      expect(eventLoopServed).toBe(true)
+    } finally {
+      clearInterval(ticker)
+    }
+  })
+
+  it('getLocalMoliVersion returns null for a non-existent binary without blocking', async () => {
+    expect(await getLocalMoliVersion('/non/existent/moli')).toBeNull()
   })
 })
 

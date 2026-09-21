@@ -30,9 +30,9 @@ const force = process.argv.includes('--force')
 const cached = join(homedir(), '.cache', 'moli', 'moli')
 
 console.log(`[switch-moli] latest tag on release source: ${await fetchLatestMoliReleaseTag()}`)
-console.log(`[switch-moli] local cached version: ${getLocalMoliVersion(cached)}`)
+console.log(`[switch-moli] local cached version: ${await getLocalMoliVersion(cached)}`)
 
 const bin = await downloadLatestMoliBinary(undefined, { forceOverwrite: force })
 if (!isExecutableFile(bin)) throw new Error(`downloaded binary not executable: ${bin}`)
-console.log(`[switch-moli] binary ready at ${bin} (version ${getLocalMoliVersion(bin)})`)
+console.log(`[switch-moli] binary ready at ${bin} (version ${await getLocalMoliVersion(bin)})`)
 console.log(`[switch-moli] resolver picks: ${await resolveMoliBinary('')}`)

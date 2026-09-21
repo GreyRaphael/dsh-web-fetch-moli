@@ -45,6 +45,7 @@ export class MoliProcessManager {
   private endpoint: string | undefined
   private starting: Promise<string> | undefined
   private stderrBuffer: string[] = []
+  private disposed = false
 
   /** Get the current live endpoint if running. */
   get currentEndpoint(): string | undefined {
@@ -56,13 +57,24 @@ export class MoliProcessManager {
    *
    * @param moliPath - executable binary path.
    * @returns CDP endpoint URL (e.g. `http://127.0.0.1:9222`).
+   * @throws after {@link stop} was called — a disposed manager must never
+   *   spawn a new daemon nothing will own afterwards (orphan leak).
    */
   async ensure(moliPath: string, maxConcurrency?: number): Promise<string> {
+    if (this.disposed) {
+      throw new Error('moli process manager is disposed; cannot start a new daemon')
+    }
+
     if (this.child && this.endpoint) {
       const isLive = await checkCdpEndpointHealthy(this.endpoint, 500)
       if (isLive) return this.endpoint
-      // Stale or dead process
+      // Stale or dead process. Stop only this child; the manager remains
+      // reusable so ensure() can recover by starting a fresh daemon.
       await this.stop()
+      // A concurrent dispose may have raced the recoverable stop.
+      if (this.disposed) {
+        throw new Error('moli process manager is disposed; cannot start a new daemon')
+      }
     }
 
     if (this.starting) return this.starting
@@ -85,6 +97,11 @@ export class MoliProcessManager {
         })
         this.child = child
 
+        // Drain stdout: a piped-but-unread stdout fills the OS pipe buffer
+        // (~64KB) and the daemon wedges inside a write() call — the exact
+        // "healthy socket, unresponsive engine" failure this guards against.
+        child.stdout?.on('data', () => {})
+
         child.stderr?.on('data', (chunk: Buffer) => {
           this.stderrBuffer.push(chunk.toString('utf-8'))
           if (this.stderrBuffer.length > 50) this.stderrBuffer.shift()
@@ -100,10 +117,22 @@ export class MoliProcessManager {
           this.endpoint = undefined
         })
 
+        // A dispose that raced us between getFreePort() and spawn() must not
+        // leave this fresh daemon unowned: kill it here and fail the caller.
+        if (this.disposed) {
+          this.killTree(child)
+          throw new Error('moli process manager is disposed; cannot start a new daemon')
+        }
+
         // Poll /json/version until ready or timeout
         const deadline = Date.now() + 5000
         let ready = false
         while (Date.now() < deadline) {
+          // A concurrent stop()/dispose() kills the daemon mid-start; fail
+          // with the disposed reason instead of a confusing "not ready".
+          if (this.disposed) {
+            throw new Error('moli process manager is disposed; cannot start a new daemon')
+          }
           if (child.exitCode !== null) {
             const errOutput = this.stderrBuffer.join('')
             throw new Error(`moli serve exited prematurely with code ${child.exitCode}: ${errOutput}`)
@@ -133,7 +162,8 @@ export class MoliProcessManager {
   }
 
   /**
-   * Stop the local Moli serve daemon.
+   * Stop the current local Moli daemon while keeping this manager reusable.
+   * A later {@link ensure} may start a replacement (for crash recovery).
    */
   async stop(): Promise<void> {
     const child = this.child
@@ -152,11 +182,36 @@ export class MoliProcessManager {
           }
         }, 1500)
         await new Promise<void>((resolve) => {
+          const exitTimer = setTimeout(resolve, 5_000)
           child.once('exit', () => {
             clearTimeout(killTimer)
+            clearTimeout(exitTimer)
             resolve()
           })
         })
+      }
+    } catch {
+      // Best-effort
+    }
+  }
+
+  /**
+   * Permanently dispose this manager. Unlike {@link stop}, later ensure calls
+   * fail fast so an in-flight plugin teardown cannot resurrect an orphan.
+   */
+  async dispose(): Promise<void> {
+    this.disposed = true
+    await this.stop()
+  }
+
+  /** Fire-and-forget kill used when a raced spawn must be cleaned up. */
+  private killTree(child: ChildProcess): void {
+    try {
+      if (child.exitCode === null) {
+        child.kill('SIGTERM')
+        setTimeout(() => {
+          if (child.exitCode === null) child.kill('SIGKILL')
+        }, 1500)
       }
     } catch {
       // Best-effort

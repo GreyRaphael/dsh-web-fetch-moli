@@ -101,15 +101,5 @@ export interface CdpBrowser {
 
 /** The `chromium` namespace of whichever protocol driver serves a fetch. */
 export interface CdpChromium {
-  launch?(options?: { headless?: boolean; executablePath?: string; timeout?: number }): Promise<CdpBrowser>
   connectOverCDP(endpointURL: string, options?: { timeout?: number }): Promise<CdpBrowser>
 }
-
-
-/** Backward-compatibility type aliases */
-export type PlaywrightResponse = CdpResponse
-export type PlaywrightRequest = CdpRequest
-export type PlaywrightPage = CdpPage
-export type PlaywrightContext = CdpContext
-export type PlaywrightBrowser = CdpBrowser
-export type PlaywrightChromium = CdpChromium
