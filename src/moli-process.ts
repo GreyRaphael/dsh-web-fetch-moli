@@ -91,10 +91,7 @@ export class MoliProcessManager {
           args.push('--http-max-host-connections', String(maxConcurrency))
         }
 
-        const child = spawn(moliPath, args, {
-          stdio: ['ignore', 'pipe', 'pipe'],
-          detached: false,
-        })
+        const child = this.spawnDaemon(moliPath, args)
         this.child = child
 
         // Drain stdout: a piped-but-unread stdout fills the OS pipe buffer
@@ -202,6 +199,18 @@ export class MoliProcessManager {
   async dispose(): Promise<void> {
     this.disposed = true
     await this.stop()
+  }
+
+  /**
+   * Spawn the daemon child process. Protected seam: tests substitute a fake
+   * executable on platforms where script-file fakes cannot be spawned
+   * (Node's Windows security patch rejects .cmd/.bat without `shell: true`).
+   */
+  protected spawnDaemon(moliPath: string, args: string[]): ChildProcess {
+    return spawn(moliPath, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: false,
+    })
   }
 
   /** Fire-and-forget kill used when a raced spawn must be cleaned up. */

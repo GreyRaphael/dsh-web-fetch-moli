@@ -1,8 +1,6 @@
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import { spawn } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync, chmodSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import type { ChildProcess } from 'node:child_process'
 import { checkCdpEndpointHealthy, getFreePort, MoliProcessManager } from '../src/moli-process.ts'
 import { resolveMoliBinary } from '../src/moli-resolve.ts'
 
@@ -25,18 +23,34 @@ describe('MoliProcessManager disposal and cleanup', () => {
     vi.restoreAllMocks()
   })
 
-  /** A fake moli executable: stays alive but never serves CDP. */
-  function fakeMoliBin(): { path: string; cleanup: () => void } {
-    const dir = mkdtempSync(join(tmpdir(), 'moli-fake-'))
-    const isWindows = process.platform === 'win32'
-    const path = join(dir, isWindows ? 'moli.cmd' : 'moli')
-    if (isWindows) {
-      writeFileSync(path, `@echo off\n"${process.execPath}" -e "setInterval(() => {}, 1000)"\n`)
-    } else {
-      writeFileSync(path, `#!/bin/sh\nexec "${process.execPath}" -e 'setInterval(() => {}, 1000)'\n`)
-      chmodSync(path, 0o755)
+  /**
+   * A manager whose daemon is a real stay-alive node child (spawned from the
+   * platform's own node binary — a real executable, never a .cmd/.bat script,
+   * which Node's Windows security patch rejects without `shell: true` with
+   * EINVAL). The child never serves CDP, so `ensure`'s readiness poll keeps
+   * looping — exactly the state the dispose race must interrupt.
+   */
+  class FakeDaemonManager extends MoliProcessManager {
+    children: ChildProcess[] = []
+
+    protected spawnDaemon(_moliPath: string, _args: string[]): ChildProcess {
+      const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+      this.children.push(child)
+      return child
     }
-    return { path, cleanup: () => { rmSync(dir, { recursive: true, force: true }) } }
+
+    async killAll(): Promise<void> {
+      for (const child of this.children) {
+        if (child.exitCode === null) child.kill('SIGKILL')
+      }
+      await Promise.all(this.children.map(child =>
+        child.exitCode !== null || child.signalCode !== null
+          ? Promise.resolve()
+          : new Promise<void>(resolve => { child.once('exit', () => resolve()) }),
+      ))
+    }
   }
 
   it('stop() keeps the manager reusable while dispose() permanently rejects ensure()', async () => {
@@ -53,14 +67,13 @@ describe('MoliProcessManager disposal and cleanup', () => {
   })
 
   it('ensure() fails with the disposed reason when dispose() races a start', { timeout: 15_000 }, async () => {
-    const { path, cleanup } = fakeMoliBin()
-    const manager = new MoliProcessManager()
+    const manager = new FakeDaemonManager()
     try {
       // A dispose racing a start: the fake daemon stays alive (never ready),
       // so the start loop is still polling when stop() flips the flag.
       // Attach the rejection handler immediately: dispose waits for child
       // shutdown while the start loop may reject in parallel.
-      const startPromise = manager.ensure(path, 1).then(
+      const startPromise = manager.ensure('/fake/moli', 1).then(
         () => { throw new Error('expected start to reject') },
         (error: unknown) => error,
       )
@@ -75,8 +88,7 @@ describe('MoliProcessManager disposal and cleanup', () => {
       await new Promise(resolve => { setTimeout(resolve, 100) })
       expect(manager.currentEndpoint).toBeUndefined()
     } finally {
-      await manager.stop().catch(() => {})
-      cleanup()
+      await manager.killAll()
     }
   })
 
