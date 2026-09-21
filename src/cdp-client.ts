@@ -255,17 +255,25 @@ export class NativeCdpContext implements CdpContext {
     const createParams: Record<string, unknown> = { url: 'about:blank' }
     if (this.browserContextId) createParams.browserContextId = this.browserContextId
 
-    const targetRes = await this.browser.send('Target.createTarget', createParams) as { targetId: string }
-    const targetId = targetRes.targetId
+    let targetId: string | undefined
+    let page: NativeCdpPage | undefined
+    try {
+      const targetRes = await this.browser.send('Target.createTarget', createParams) as { targetId: string }
+      targetId = targetRes.targetId
 
-    const attachRes = await this.browser.send('Target.attachToTarget', { targetId, flatten: true }) as { sessionId: string }
-    const sessionId = attachRes.sessionId
+      const attachRes = await this.browser.send('Target.attachToTarget', { targetId, flatten: true }) as { sessionId: string }
+      page = new NativeCdpPage(this, targetId, attachRes.sessionId)
+      this.browser.registerSession(attachRes.sessionId, page)
 
-    const page = new NativeCdpPage(this, targetId, sessionId)
-    this.browser.registerSession(sessionId, page)
-
-    await page.init()
-    return page
+      await page.init()
+      return page
+    } catch (error: unknown) {
+      // Profile-mode callers cannot dispose the default context, so creation
+      // must clean up its own partially-created target and registered session.
+      if (page !== undefined) await page.close().catch(() => {})
+      else if (targetId !== undefined) await this.browser.send('Target.closeTarget', { targetId }).catch(() => {})
+      throw error
+    }
   }
 
   async close(): Promise<void> {
@@ -363,6 +371,7 @@ export class NativeCdpPage implements CdpPage {
 
     const timeout = options?.timeout ?? 30000
     const waitUntil = options?.waitUntil ?? 'domcontentloaded'
+    const expiresAt = Date.now() + timeout
 
     this.domContentLoaded = false
     this.loadFired = false
@@ -384,33 +393,42 @@ export class NativeCdpPage implements CdpPage {
     this.responseListeners.add(responseHandler)
 
     let pollTimer: NodeJS.Timeout | null = null
+    let lifecycleDone = false
+    let resolveLifecycle!: () => void
+    const lifecycle = new Promise<void>((resolve) => { resolveLifecycle = resolve })
+    const onDone = () => {
+      if (lifecycleDone) return
+      lifecycleDone = true
+      resolveLifecycle()
+    }
+    const waiterList = waitUntil === 'domcontentloaded'
+      ? this.domContentWaiters
+      : waitUntil === 'networkidle'
+        ? this.networkIdleWaiters
+        : this.loadWaiters
+
+    const removeLifecycleWaiter = () => {
+      const index = waiterList.indexOf(onDone)
+      if (index !== -1) waiterList.splice(index, 1)
+    }
+
+    if (waitUntil === 'domcontentloaded') {
+      if (this.domContentLoaded) onDone()
+      else waiterList.push(onDone)
+    } else if (waitUntil === 'load') {
+      if (this.loadFired) onDone()
+      else waiterList.push(onDone)
+    } else {
+      waiterList.push(onDone)
+      this.checkNetworkIdle()
+    }
 
     try {
-      const waitPromise = new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          if (pollTimer) clearInterval(pollTimer)
-          reject(new Error(`Navigation timeout of ${timeout}ms exceeded: ${url}`))
-        }, timeout)
-
-        const onDone = () => {
-          clearTimeout(timer)
-          if (pollTimer) clearInterval(pollTimer)
-          resolve()
-        }
-
-        if (waitUntil === 'domcontentloaded') {
-          if (this.domContentLoaded) onDone()
-          else this.domContentWaiters.push(onDone)
-        } else {
-          if (this.loadFired) onDone()
-          else this.loadWaiters.push(onDone)
-        }
-      })
-
       const navRes = await this.send('Page.navigate', { url }) as { frameId?: string; errorText?: string }
       if (navRes?.errorText) {
         throw new Error(`cannot navigate to ${url}: ${navRes.errorText}`)
       }
+      if (navRes?.frameId && !this.mainFrameId) this.mainFrameId = navRes.frameId
 
       // Active readyState polling fallback in case browser engine (e.g. Moli)
       // delays or misses emitting Page.domContentEventFired / Page.loadEventFired.
@@ -430,6 +448,7 @@ export class NativeCdpPage implements CdpPage {
           if (info && typeof info.state === 'string') {
             const hasNavigated = Boolean(info.href && !info.href.startsWith('about:blank'))
             if (hasNavigated) {
+              if (typeof info.href === 'string') this.currentUrl = info.href
               if (info.state === 'interactive' || info.state === 'complete') {
                 this.triggerDomContentLoaded()
               }
@@ -445,11 +464,34 @@ export class NativeCdpPage implements CdpPage {
         }
       }, 250)
 
-      await waitPromise
-      this.currentUrl = url
+      const remaining = Math.max(0, expiresAt - Date.now())
+      let timeoutTimer: NodeJS.Timeout | undefined
+      try {
+        await Promise.race([
+          lifecycle,
+          new Promise<never>((_, reject) => {
+            timeoutTimer = setTimeout(() => {
+              reject(new Error(`Navigation timeout of ${timeout}ms exceeded: ${url}`))
+            }, remaining)
+          }),
+        ])
+      } finally {
+        if (timeoutTimer !== undefined) clearTimeout(timeoutTimer)
+      }
+
+      // Page.frameNavigated (or the readyState fallback above) owns the final
+      // URL. Only fall back to the requested/response URL when no event updated it.
+      if (this.currentUrl === 'about:blank') {
+        const completedResponse = targetResponse as CdpResponse | null
+        const responseUrl = completedResponse !== null && typeof completedResponse.url === 'function'
+          ? completedResponse.url()
+          : ''
+        this.currentUrl = responseUrl || url
+      }
       return targetResponse
     } finally {
       if (pollTimer) clearInterval(pollTimer)
+      removeLifecycleWaiter()
       this.responseListeners.delete(responseHandler)
     }
   }
@@ -581,13 +623,14 @@ export class NativeCdpPage implements CdpPage {
 
   async handlePopupCreated(popupTargetId: string): Promise<void> {
     if (this.popupListeners.size === 0) return
+    let popupPage: NativeCdpPage | undefined
     try {
       const attachRes = await this.ctx.browser.send('Target.attachToTarget', {
         targetId: popupTargetId,
         flatten: true,
       }) as { sessionId: string }
 
-      const popupPage = new NativeCdpPage(this.ctx, popupTargetId, attachRes.sessionId)
+      popupPage = new NativeCdpPage(this.ctx, popupTargetId, attachRes.sessionId)
       this.ctx.browser.registerSession(attachRes.sessionId, popupPage)
       await popupPage.init()
 
@@ -595,7 +638,10 @@ export class NativeCdpPage implements CdpPage {
         try { listener(popupPage) } catch {}
       }
     } catch {
-      // Best effort
+      // A failed attach/init must not leave an unowned popup target in the
+      // user's persistent browser profile.
+      if (popupPage !== undefined) await popupPage.close().catch(() => {})
+      else await this.ctx.browser.send('Target.closeTarget', { targetId: popupTargetId }).catch(() => {})
     }
   }
 

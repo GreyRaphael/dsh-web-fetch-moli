@@ -109,6 +109,54 @@ class Deadline {
     return Math.max(1, this.expiresAt - Date.now())
   }
 
+  throwIfAborted(): void {
+    if (!this.signal.aborted) return
+    throw this.signal.reason instanceof Error ? this.signal.reason : new Error('moli fetch aborted')
+  }
+
+  /**
+   * Await an operation under this deadline. If the deadline wins, reject
+   * immediately while still observing the operation so a value produced late
+   * can be cleaned up without an unhandled rejection.
+   */
+  async race<T>(operation: Promise<T>, onLateValue?: (value: T) => void | Promise<void>): Promise<T> {
+    return await new Promise<T>((resolve, reject) => {
+      let finished = false
+      const cleanup = () => { this.signal.removeEventListener('abort', onAbort) }
+      const disposeLate = (value: T) => {
+        if (onLateValue !== undefined) void Promise.resolve(onLateValue(value)).catch(() => {})
+      }
+      const onAbort = () => {
+        if (finished) return
+        finished = true
+        cleanup()
+        reject(this.signal.reason instanceof Error ? this.signal.reason : new Error('moli fetch aborted'))
+      }
+
+      this.signal.addEventListener('abort', onAbort, { once: true })
+      // Adding a listener to an already-aborted signal does not dispatch it.
+      if (this.signal.aborted) onAbort()
+
+      void operation.then(
+        (value) => {
+          if (finished) {
+            disposeLate(value)
+            return
+          }
+          finished = true
+          cleanup()
+          resolve(value)
+        },
+        (error: unknown) => {
+          if (finished) return
+          finished = true
+          cleanup()
+          reject(error)
+        },
+      )
+    })
+  }
+
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
@@ -134,6 +182,9 @@ class Semaphore {
   }
 
   acquire(signal: AbortSignal, queueTimeoutMs: number): Promise<void> {
+    if (signal.aborted) {
+      return Promise.reject(new WebError('web fetch aborted while waiting for a free rendering slot', 'WEB_ABORTED'))
+    }
     if (this.active < this.limit) {
       this.active++
       return Promise.resolve()
@@ -167,6 +218,8 @@ class Semaphore {
       }
       this.queue.push(waiter)
       signal.addEventListener('abort', onAbort, { once: true })
+      // Close the race between the initial check and listener registration.
+      if (signal.aborted) onAbort()
     })
   }
 
@@ -286,13 +339,19 @@ export class MoliFetchProvider implements WebFetchProvider {
       // CDP mode execution (local daemon or remote endpoint)
       let session: MoliBrowserSession | undefined
       try {
-        session = await this.openSession(config, deadline)
+        session = await deadline.race(
+          this.openSession(config, deadline),
+          async lateSession => { await closeSession(lateSession, this.cdpPool) },
+        )
 
         const held = session
         const onAbort = () => { void closeSession(held, this.cdpPool) }
         deadline.signal.addEventListener('abort', onAbort, { once: true })
+        // Adding to an already-aborted signal is inert; close explicitly if the
+        // deadline won in the tiny window after openSession returned.
+        if (deadline.signal.aborted) onAbort()
         try {
-          return await this.retrieve(session, url, config, deadline)
+          return await deadline.race(this.retrieve(session, url, config, deadline))
         } finally {
           deadline.signal.removeEventListener('abort', onAbort)
         }
@@ -311,20 +370,44 @@ export class MoliFetchProvider implements WebFetchProvider {
   protected async openSession(config: ResolvedConfig, deadline: Deadline): Promise<MoliBrowserSession> {
     const timeout = Math.min(deadline.remainingMs(), 20_000)
 
+    deadline.throwIfAborted()
     let endpoint: string
     if (config.backend === 'cdp') {
       endpoint = normalizeCdpEndpoint(config.cdpEndpoint)
     } else {
       // Local managed Moli serve daemon (aligned with active concurrency capacity)
       const moliBin = await resolveMoliBinary(config.moliPath)
+      deadline.throwIfAborted()
       endpoint = await this.moliProcess.ensure(moliBin, effectiveMaxConcurrency(config))
+      deadline.throwIfAborted()
     }
 
     try {
+      deadline.throwIfAborted()
       const lease = await this.cdpPool.acquire(endpoint, timeout, effectiveContextMode(config))
-      await setupPageHooks(lease.page, {
-        bypassCsp: config.bypassCsp,
-      })
+      let released = false
+      const release = async () => {
+        if (released) return
+        released = true
+        await this.cdpPool.release(lease)
+      }
+      const onAbort = () => { void release() }
+      deadline.signal.addEventListener('abort', onAbort, { once: true })
+      if (deadline.signal.aborted) onAbort()
+      try {
+        await setupPageHooks(lease.page, {
+          bypassCsp: config.bypassCsp,
+        })
+        if (deadline.signal.aborted) {
+          await release()
+          throw new Error('moli fetch deadline elapsed while opening a page')
+        }
+      } catch (error: unknown) {
+        await release()
+        throw error
+      } finally {
+        deadline.signal.removeEventListener('abort', onAbort)
+      }
       guardPopups(lease.page)
       return {
         browser: lease.browser,

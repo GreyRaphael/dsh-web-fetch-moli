@@ -441,6 +441,36 @@ describe('MoliFetchProvider', () => {
     const code = await codeOf(slowProvider.fetch({ url: 'https://example.com/slow' }))
     expect(code).toBe('WEB_FETCH_TIMEOUT')
   })
+
+  it('enforces the deadline while openSession is still pending and cleans up a late session', async () => {
+    let releaseOpen!: (session: MoliBrowserSession) => void
+    const lateSession = fakeSession({})
+    class SlowOpenProvider extends MoliFetchProvider {
+      constructor() {
+        super(() => ({
+          backend: 'local', moliPath: '', cdpEndpoint: '', shareBrowserContext: true,
+          bypassCsp: true, autoScrollSentinel: true, denoise: true,
+          timeoutMs: 30, maxConcurrency: 1, challengeWaitMs: 0, challengeRetries: 0,
+        }))
+      }
+
+      protected async openSession(): Promise<MoliBrowserSession> {
+        return await new Promise(resolve => { releaseOpen = resolve })
+      }
+    }
+
+    const provider = new SlowOpenProvider()
+    const started = Date.now()
+    const error = await provider.fetch({ url: 'https://example.com/slow-open' }).catch(value => value)
+    expect(error).toBeInstanceOf(WebError)
+    expect((error as WebError).code).toBe('WEB_FETCH_TIMEOUT')
+    expect(Date.now() - started).toBeLessThan(1_000)
+
+    releaseOpen(lateSession)
+    await new Promise(resolve => { setImmediate(resolve) })
+    expect((lateSession as unknown as { closed: { pageClosed: boolean } }).closed.pageClosed).toBe(true)
+    await provider.dispose()
+  })
 })
 
 describe('MoliFetchProvider concurrency queue', () => {
