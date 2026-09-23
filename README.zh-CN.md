@@ -40,7 +40,7 @@ web_fetch (tool-web)
 
 ## 环境依赖
 
-- DeepSeek Harness (`dsh web`)，Node.js ≥ 20。
+- DeepSeek Harness (`dsh web`)，Node.js ≥ 22（插件通过原生全局 `WebSocket` 驱动 CDP，Node 20 不提供该 API）。
 - **免手动安装**：插件内置**首次使用自动下载安装**能力。若检测到系统中未安装 Moli，会自动从官方 Release 下载适配当前操作系统与 CPU 架构（Linux、macOS、Windows x86_64 / arm64）的最新版二进制并就绪，开箱即用。
 - 亦支持使用已有的 [Moli](https://github.com/GreyRaphael/moli) v1.1.5+（置于系统 `$PATH`、`~/.local/bin/moli`，或在配置项中指定 `moliPath`）。
 

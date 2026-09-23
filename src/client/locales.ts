@@ -9,7 +9,7 @@ export type MoliCardLocaleKey =
   | 'title' | 'description'
   | 'backendLabel' | 'backendLocal' | 'backendLocalHint' | 'backendCdp' | 'backendCdpHint'
   | 'moliPath' | 'moliPathHint' | 'moliPathPlaceholder'
-  | 'cdpEndpoint' | 'cdpEndpointHint'
+  | 'cdpEndpoint' | 'cdpEndpointHint' | 'cdpEndpointPlaceholder'
   | 'bypassCsp' | 'bypassCspHint'
   | 'autoScrollSentinel' | 'autoScrollSentinelHint'
   | 'shareBrowserContext' | 'shareBrowserContextHint'
@@ -17,6 +17,7 @@ export type MoliCardLocaleKey =
   | 'timeoutMs' | 'timeoutMsHint' | 'timeoutMsPlaceholder'
   | 'maxConcurrency' | 'maxConcurrencyHint' | 'maxConcurrencyPlaceholder'
   | 'challengeWaitMs' | 'challengeWaitMsHint' | 'challengeWaitMsPlaceholder'
+  | 'challengeRetries' | 'challengeRetriesHint' | 'challengeRetriesPlaceholder'
   | 'overridden' | 'reset' | 'readOnly' | 'expand' | 'collapse'
   | 'save' | 'saving' | 'discard' | 'unsaved' | 'saveFailed' | 'invalidText'
 
@@ -41,6 +42,7 @@ export const en: Record<MoliCardLocaleKey, string> = {
   moliPathPlaceholder: '(auto: moli from $PATH)',
   cdpEndpoint: 'CDP endpoint',
   cdpEndpointHint: 'host:port or http(s)/ws URL. Leave blank for 127.0.0.1:9222.',
+  cdpEndpointPlaceholder: '',
   bypassCsp: 'Bypass CSP (micro-frontend support)',
   bypassCspHint: 'Enables CDP Page.setBypassCSP to allow dynamic script loading in micro-frontend sandboxes (e.g. Alibaba Alfa / qiankun).',
   autoScrollSentinel: 'Auto-trigger lazy-load sentinels',
@@ -58,6 +60,9 @@ export const en: Record<MoliCardLocaleKey, string> = {
   challengeWaitMs: 'Cloudflare challenge wait (ms)',
   challengeWaitMsHint: 'Bounded wait for Cloudflare challenge verification. 0 = off.',
   challengeWaitMsPlaceholder: '(default: 5000)',
+  challengeRetries: 'Cloudflare challenge retries',
+  challengeRetriesHint: 'Same-page re-navigation attempts after the challenge wait window runs out.',
+  challengeRetriesPlaceholder: '(default: 0)',
   overridden: 'Overridden',
   reset: 'Reset to default',
   readOnly: 'This deployment stores settings read-only.',
@@ -85,6 +90,7 @@ export const zh: Record<MoliCardLocaleKey, string> = {
   moliPathPlaceholder: '（自动：按 $PATH 查找 moli）',
   cdpEndpoint: 'CDP 地址',
   cdpEndpointHint: 'host:port 或 http(s)/ws 地址；留空默认 127.0.0.1:9222。',
+  cdpEndpointPlaceholder: '',
   bypassCsp: '绕过 CSP（支持微前端）',
   bypassCspHint: '开启 CDP Page.setBypassCSP，允许微前端沙箱（如阿里 Alfa / qiankun）动态加载模块。',
   autoScrollSentinel: '自动触发瀑布流懒加载',
@@ -102,6 +108,9 @@ export const zh: Record<MoliCardLocaleKey, string> = {
   challengeWaitMs: 'Cloudflare 挑战等待上限（毫秒）',
   challengeWaitMsHint: '在同一页面内有界等待 Cloudflare 验证通过。0 为关闭。',
   challengeWaitMsPlaceholder: '（默认：5000）',
+  challengeRetries: 'Cloudflare 挑战重试次数',
+  challengeRetriesHint: '挑战等待窗口用尽后，在同一页面上的重新导航尝试次数。',
+  challengeRetriesPlaceholder: '（默认：0）',
   overridden: '已覆盖',
   reset: '恢复默认',
   readOnly: '本部署的设置为只读。',

@@ -24,15 +24,15 @@ export function MoliCard(props: MoliCardProps) {
   const backend = state.backend.text === 'cdp' ? 'cdp' : 'local'
 
   const bindValue = (
-    field: 'moliPath' | 'cdpEndpoint' | 'timeoutMs' | 'maxConcurrency' | 'challengeWaitMs',
+    field: 'moliPath' | 'cdpEndpoint' | 'timeoutMs' | 'maxConcurrency' | 'challengeWaitMs' | 'challengeRetries',
     options?: { id?: string; embedded?: boolean; disabled?: boolean; placeholder?: string },
   ) => (
     <ValueField
       id={options?.id ?? `plugin-config-moli-${field}`}
       embedded={options?.embedded}
       label={t(field)}
-      hint={t(`${field}Hint` as any)}
-      placeholder={options?.placeholder ?? (t(`${field}Placeholder` as any) || '')}
+      hint={t(`${field}Hint`)}
+      placeholder={options?.placeholder ?? (t(`${field}Placeholder`) || '')}
       overriddenLabel={t('overridden')}
       resetLabel={t('reset')}
       invalidLabel={t('invalidText')}
@@ -51,7 +51,7 @@ export function MoliCard(props: MoliCardProps) {
       id={options?.id ?? `plugin-config-moli-${field}`}
       embedded={options?.embedded}
       label={t(field)}
-      hint={t(`${field}Hint` as any)}
+      hint={t(`${field}Hint`)}
       checked={state[field].text !== 'false'}
       overridden={state[field].overridden}
       overriddenLabel={t('overridden')}
@@ -129,6 +129,7 @@ export function MoliCard(props: MoliCardProps) {
       {bindValue('timeoutMs')}
       {bindValue('maxConcurrency')}
       {bindValue('challengeWaitMs')}
+      {bindValue('challengeRetries')}
     </PluginCard>
   )
 }

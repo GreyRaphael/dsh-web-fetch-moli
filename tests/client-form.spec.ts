@@ -55,7 +55,7 @@ class FakeScope implements SettingsScope<Record<string, unknown>> {
   }
 }
 
-/** The card's field set: backend radio, two text inputs, two checkboxes, two numbers. */
+/** The card's field set: backend radio, two text inputs, two checkboxes, three numbers. */
 function makeForm(scope: SettingsScope<Record<string, unknown>>) {
   return new CardForm(scope, [
     radioField('backend', ['local', 'cdp']),
@@ -64,6 +64,7 @@ function makeForm(scope: SettingsScope<Record<string, unknown>>) {
     checkboxField('denoise'),
     numberField('maxConcurrency', 1, 8),
     numberField('challengeWaitMs', 0, 60_000),
+    numberField('challengeRetries', 0, 3),
   ])
 }
 
@@ -206,6 +207,25 @@ describe('CardForm', () => {
     form.actions().edit('challengeWaitMs', '60001')
     expect(form.field('challengeWaitMs').invalid).toBe(true)
     expect(form.shell().invalid).toBe(true)
+    form.actions().discard()
+  })
+
+  it('the challenge-retries field round-trips its 0..3 range and rejects values past the schema ceiling', async () => {
+    const scope = new FakeScope({ challengeRetries: 0 })
+    const form = makeForm(scope)
+    expect(form.field('challengeRetries').text).toBe('0')
+    form.actions().edit('challengeRetries', '3')
+    expect(form.field('challengeRetries').invalid).toBe(false)
+    await form.save()
+    expect(scope.writes).toEqual([{ field: 'challengeRetries', op: 'set', value: 3 }])
+    form.actions().edit('challengeRetries', '')
+    await form.save()
+    expect(scope.writes[scope.writes.length - 1]).toEqual({ field: 'challengeRetries', op: 'unset' })
+    for (const bad of ['4', '-1', '1.5', 'many']) {
+      form.actions().edit('challengeRetries', bad)
+      expect(form.field('challengeRetries').invalid, bad).toBe(true)
+      expect(form.shell().invalid, bad).toBe(true)
+    }
     form.actions().discard()
   })
 

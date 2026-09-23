@@ -38,7 +38,7 @@ web_fetch (tool-web)
 
 ## Requirements
 
-- DeepSeek Harness (`dsh web`), Node.js ≥ 20.
+- DeepSeek Harness (`dsh web`), Node.js ≥ 22 (the plugin drives CDP over the native global `WebSocket`, which Node 20 does not provide).
 - **Zero manual setup**: the plugin features **automatic download on first use**. If no `moli` binary is detected on your system, it automatically downloads and unpacks the latest release binary matching your OS and architecture (Linux, macOS, Windows x86_64 / arm64) into `~/.cache/moli`.
 - Existing installations of [Moli](https://github.com/GreyRaphael/moli) v1.1.5+ are automatically detected on `$PATH`, `~/.local/bin/moli`, or via the `moliPath` setting.
 

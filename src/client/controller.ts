@@ -23,6 +23,7 @@ export interface MoliSettings {
   timeoutMs?: number
   maxConcurrency?: number
   challengeWaitMs?: number
+  challengeRetries?: number
 }
 
 /** What the Moli card renders. */
@@ -37,6 +38,7 @@ export interface MoliCardState extends CardShell {
   timeoutMs: CardFieldState
   maxConcurrency: CardFieldState
   challengeWaitMs: CardFieldState
+  challengeRetries: CardFieldState
 }
 
 /** The registration-side face the card's slot entry injects. */
@@ -65,6 +67,7 @@ export class MoliCardController {
         numberField('timeoutMs', 1000, 300_000),
         numberField('maxConcurrency', 1, 200),
         numberField('challengeWaitMs', 0, 60_000),
+        numberField('challengeRetries', 0, 3),
       ],
     )
     this.store = this.form.bind(() => this.projection())
@@ -83,6 +86,7 @@ export class MoliCardController {
       timeoutMs: this.form.field('timeoutMs'),
       maxConcurrency: this.form.field('maxConcurrency'),
       challengeWaitMs: this.form.field('challengeWaitMs'),
+      challengeRetries: this.form.field('challengeRetries'),
     }
   }
 

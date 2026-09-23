@@ -5,6 +5,25 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-09-23
+
+### Fixed
+
+- **`engines.node` 更正为 `>=22`（与运行时不符的声明）**:
+  - `src/cdp-client.ts` 通过全局 `new WebSocket(...)` 驱动 CDP，该 API 自 Node 22 起默认启用（Node 20 无此全局）。原 `engines: node >=20` 声明会让 Node 20 用户安装后在连接 CDP 时运行时崩溃。
+  - `README.md` 与 `README.zh-CN.md` 的 Requirements 同步更正为 Node.js ≥ 22 并注明原因。
+
+- **`challengeRetries` 暴露到设置卡片（文档与 UI 失配）**:
+  - README 配置表格与 provider 均已实现该字段，但设置卡片（`src/client/controller.ts` 字段列表、`MoliSettings`/`MoliCardState`、`locales.ts` 中英文词典、`card.tsx` 渲染）全部缺失——用户无法通过 UI 配置。现已按 schema 范围（0–3）以 `numberField` 补齐全部四处并新增中英文 hint/占位符文案。
+  - `tests/client-form.spec.ts` 新增 `challengeRetries` 字段规格与专项测试（0..3 范围往返、超上限拒绝）。
+
+- **`package.json` disclosure.permissions 去重**:
+  - `network:fetch` 权限出现两次（local 与 CDP profile mode 各一条），合并为一条覆盖两种后端的表述。
+
+- **消除类型逃逸（`as any`）**:
+  - `src/index.ts` 的 `tools/execute` 钩子：`(toolsCtx as any).on('tools/execute', (exec: any, ...))` 改为经由 `import type {} from '@deepseek-ai/dsh-tools'`（devDependency，`@deepseek-ai/dsh-tools@0.1.2-alpha.5`，与现有 dsh 系列依赖同代）引入的 cordis 模块增强直接以声明签名调用 `toolsCtx.on('tools/execute', ...)` 与 `toolsCtx.tools.get(...)`。类型导入零运行时足迹——`lib/index.js` 构建产物无任何 `dsh-tools` 引用。
+  - `src/client/card.tsx`：`t(\`${field}Hint\` as any)` / `t(\`${field}Placeholder\` as any)` 收敛为类型安全的模板字面量键——字段名联合与词典键一一对应（`bindValue` 字段集补充 `challengeRetries`，并为 `cdpEndpoint` 补齐缺失的空 `cdpEndpointPlaceholder` 键使联合完备）。
+
 ## [0.5.0] - 2026-09-21
 
 ### Fixed

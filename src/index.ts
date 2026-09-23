@@ -7,6 +7,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-settings'
+import type {} from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-web'
 import { Config, effectiveTimeoutMs } from './config.ts'
 import type { ResolvedConfig } from './config.ts'
@@ -92,11 +93,11 @@ export function apply(ctx: Context, config: Config): void {
 
   // Hook into tools/execute to dynamically align session/preset-scoped web_fetch.timeoutMs with Moli's configured budget
   ctx.inject(['tools'], (toolsCtx) => {
-    (toolsCtx as any).on('tools/execute', (exec: any, next: () => Promise<unknown>) => {
+    toolsCtx.on('tools/execute', (exec, next) => {
       if (exec.name === 'web_fetch') {
-        const tool = (toolsCtx as any).tools.get('web_fetch', exec.agent)
+        const tool = toolsCtx.tools.get('web_fetch', exec.agent)
         const budget = effectiveTimeoutMs(current())
-        if (tool && (typeof tool.timeoutMs !== 'number' || tool.timeoutMs < budget)) {
+        if (tool !== undefined && (typeof tool.timeoutMs !== 'number' || tool.timeoutMs < budget)) {
           tool.timeoutMs = budget
         }
       }

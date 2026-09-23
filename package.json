@@ -1,6 +1,6 @@
 {
   "name": "dsh-web-fetch-moli",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Moli (ultra-lightweight Rust headless browser) web-fetch provider for DeepSeek Harness: renders complex SPAs, micro-frontends, and static pages with ~60MB memory.",
   "type": "module",
   "license": "MIT",
@@ -18,7 +18,7 @@
     }
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "files": [
     "lib",
@@ -78,10 +78,9 @@
     "offlineMode": false,
     "apiKeys": [],
     "permissions": [
-      "network:fetch (renders the URLs the user requests in local Moli or CDP)",
+      "network:fetch (renders the URLs the user requests in local Moli or CDP, including CDP profile mode with remote browser sessions)",
       "network:connect (user-configured or managed CDP endpoint)",
-      "fs:read (user-configured moli executable path)",
-      "network:fetch (CDP profile mode: renders URLs with remote browser sessions)"
+      "fs:read (user-configured moli executable path)"
     ],
     "jurisdiction": [],
     "retention": "none"
@@ -121,6 +120,7 @@
     "@deepseek-ai/dsh-client-ui-settings-plugins": "0.1.2-alpha.5",
     "@deepseek-ai/dsh-client-ui-slots": "0.1.2-alpha.5",
     "@deepseek-ai/dsh-settings": "0.1.2-alpha.5",
+    "@deepseek-ai/dsh-tools": "0.1.2-alpha.5",
     "@deepseek-ai/dsh-web": "0.1.2-alpha.5",
     "@types/mozilla__readability": "^0.4.2",
     "@types/node": "^24.0.0",
