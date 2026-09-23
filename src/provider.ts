@@ -61,9 +61,6 @@ const SETTLE_MS = 500
 /** Grace period (ms) for page/context close operations. */
 const CLOSE_GRACE_MS = 1_500
 
-/** Maximum rounds of sentinel trigger flips for infinite-scroll/lazy-load pages. */
-const MAX_SENTINEL_ROUNDS = 2
-
 /** Render session for one CDP fetch. */
 export interface MoliBrowserSession {
   browser: CdpBrowser
