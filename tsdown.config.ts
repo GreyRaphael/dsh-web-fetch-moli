@@ -9,6 +9,7 @@
  * the module table; every component and style it needs lives here).
  */
 import { readFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import { basename, dirname, resolve as resolvePath } from 'node:path'
 import { builtinModules } from 'node:module'
 import type { UserConfig } from 'tsdown'
@@ -21,6 +22,7 @@ const CSS_SUFFIX = '.mjs'
 type BuildPlugin = NonNullable<UserConfig['plugins']>
 
 const PLUGIN_ID = 'dsh-web-fetch-moli'
+const PLUGIN_VERSION = JSON.parse(readFileSync('package.json', 'utf-8')).version as string
 
 function injectTag(fileId: string, cssText: string): string {
   const tagId = `${PLUGIN_ID}/${basename(fileId)}`
@@ -113,6 +115,7 @@ export default [
       alwaysBundle: ['linkedom', '@mozilla/readability', '@mdream/js'],
       neverBundle: ['mdream'],
     },
+    define: { __PLUGIN_VERSION__: JSON.stringify(PLUGIN_VERSION) },
   },
   clientBundle('client.js'),
 ] satisfies UserConfig[]

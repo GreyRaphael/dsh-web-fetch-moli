@@ -173,16 +173,23 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Read current dsh-web-fetch-moli package version from package.json.
+ * Read current dsh-web-fetch-moli package version.
+ *
+ * In production builds tsdown replaces `__PLUGIN_VERSION__` with a string
+ * literal at compile time — no runtime file I/O and no hardcoded fallback
+ * that drifts across releases.  In dev/test (where the define is absent)
+ * the function falls back to reading `../package.json` relative to the
+ * source file.
  */
 export function getPluginPackageVersion(): string {
+  /* istanbul ignore next -- build-time define is always present in production */
+  if (typeof __PLUGIN_VERSION__ === 'string') return __PLUGIN_VERSION__
   try {
     const pkgUrl = new URL('../package.json', import.meta.url)
     const content = readFileSync(pkgUrl, 'utf-8')
-    const parsed = JSON.parse(content) as { version?: string }
-    return parsed.version ?? '0.4.2'
+    return (JSON.parse(content) as { version?: string }).version ?? '0.0.0-dev'
   } catch {
-    return '0.4.2'
+    return '0.0.0-dev'
   }
 }
 
