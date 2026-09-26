@@ -5,6 +5,24 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-09-26
+
+### Added
+
+- **Moli 二进制同步更新机制升级**:
+  - 引入 24 小时检查周期 TTL（`DEFAULT_MOLI_CHECK_INTERVAL_MS`），解耦 Moli 发版与插件自身的 npm 发版周期；距离上次检查超过 24h 时在启动后台自动异步探测 GitHub Releases。
+  - 增加 SemVer 语义化版本严格比对（`parseSemVer` / `isNewerVersion`），支持 Pre-release 判定，仅当远端版本严格高于本地版本时触发更新，防止覆盖本地开发调试版本。
+  - 补充并发检测去重（`inFlightSyncs`），避免启动预热与用户请求并发触发多次远端探测。
+  - 优化离线与网络抖动容错：远端检查失败时不施加 24 小时冷却锁，保持无网环境下平滑降级到已有本地二进制。
+
+### Changed
+
+- **适配最新 DeepSeek Harness 客户端架构（`configForms` 迁移与槽位规范化）**:
+  - 彻底移除已废弃的 `settingsScope` / `@deepseek-ai/dsh-client-runtime` 依赖，切换为注入 `['slots', 'locale', 'configForms']`。
+  - 将设置卡片单点收敛注册至 bundle 规范槽位 `plugins.bundle.config`（Key 为 `dsh-web-fetch-moli`），支持 `view === 'summary'` 与 `view === 'page'` 双视图，并使用 `ctx.configForms.whileServed([WEB_FETCH_MOLI_NS], ...)` 绑定生命周期。
+  - 移除多余的手风琴折叠外壳、重复标题和无用图标样式，使 `PluginCard.tsx` 纯粹化为表单容器组件。
+  - 为 `CardForm` 与 `MoliCardController` 增加 `dispose()` 回收机制，在插件卸载或重载时彻底释放监听。
+
 ## [0.5.1] - 2026-09-23
 
 ### Fixed
