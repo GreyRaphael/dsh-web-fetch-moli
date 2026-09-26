@@ -42,19 +42,24 @@ export {
 } from './hooks.ts'
 export type { NativeScrollResult } from './hooks.ts'
 export {
+  DEFAULT_MOLI_CHECK_INTERVAL_MS,
   downloadLatestMoliBinary,
   fetchLatestMoliReleaseTag,
   findOnPath,
   getLocalMoliVersion,
   getMoliReleaseAsset,
   getPluginPackageVersion,
+  isNewerVersion,
   MOLI_RELEASES_URL,
   MOLI_REPO_SLUG,
+  parseSemVer,
   resolveCdpBackend,
   resolveMoliBinary,
+  syncLatestMoliBinary,
   syncLatestMoliOnPluginUpdate,
   withFsLockRetry,
 } from './moli-resolve.ts'
+export type { SyncMoliOptions } from './moli-resolve.ts'
 export {
   CHALLENGE_DOM_PROBE,
   CHALLENGE_FINISH_RESERVE_MS,

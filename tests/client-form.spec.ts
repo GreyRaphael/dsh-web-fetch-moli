@@ -4,12 +4,12 @@
  * radio/checkbox field kinds — no browser, no DOM.
  */
 import { describe, expect, it } from 'vitest'
-import type { SettingsScope, SettingsScopeSnapshot } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ConfigForm, ConfigFormSnapshot } from '../src/client/form.ts'
 import { CardForm, checkboxField, numberField, radioField, textField } from '../src/client/form.ts'
 
 /** Minimal reactive scope double: a snapshot, a publish path, and a write log. */
-class FakeScope implements SettingsScope<Record<string, unknown>> {
-  snapshot: SettingsScopeSnapshot<Record<string, unknown>>
+class FakeScope implements ConfigForm<Record<string, unknown>> {
+  snapshot: ConfigFormSnapshot<Record<string, unknown>>
   readonly writes: Array<{ field: string; op: 'set' | 'unset'; value?: unknown }> = []
   /** When true, writes settle WITHOUT applying (a rejected Host write). */
   dropWrites = false
@@ -23,7 +23,7 @@ class FakeScope implements SettingsScope<Record<string, unknown>> {
     this.snapshot = { status: 'ready', value, base, user, revision: 1, writable: true, mode: 'host' }
   }
 
-  getSnapshot(): SettingsScopeSnapshot<Record<string, unknown>> {
+  getSnapshot(): ConfigFormSnapshot<Record<string, unknown>> {
     return this.snapshot
   }
 
@@ -49,14 +49,14 @@ class FakeScope implements SettingsScope<Record<string, unknown>> {
     this.publish({ value, user })
   }
 
-  private publish(partial: Partial<SettingsScopeSnapshot<Record<string, unknown>>>): void {
+  private publish(partial: Partial<ConfigFormSnapshot<Record<string, unknown>>>): void {
     this.snapshot = { ...this.snapshot, ...partial }
     for (const listener of this.listeners) listener()
   }
 }
 
 /** The card's field set: backend radio, two text inputs, two checkboxes, three numbers. */
-function makeForm(scope: SettingsScope<Record<string, unknown>>) {
+function makeForm(scope: ConfigForm<Record<string, unknown>>) {
   return new CardForm(scope, [
     radioField('backend', ['local', 'cdp']),
     textField('moliPath'),

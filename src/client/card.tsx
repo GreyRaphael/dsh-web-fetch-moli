@@ -12,13 +12,26 @@ import { PluginCard } from './PluginCard.tsx'
 import { CheckboxField, RadioGroupField, ValueField } from './fields.tsx'
 import type { MoliCardFace } from './controller.ts'
 
+declare module '@deepseek-ai/dsh-client-ui-slots' {
+  interface SlotMap {
+    'plugins.bundle.config': { kind: 'keyed'; scope: 'root'; owner: { view?: 'summary' | 'page' } }
+  }
+}
+
 export type MoliCardProps =
-  PropsRuntime<'settings.plugin.item'>
+  PropsRuntime<'plugins.bundle.config'>
   & PropsLocale<'web-fetch-moli'>
   & InjectFace<MoliCardFace>
+  & {
+    view?: 'summary' | 'page'
+  }
 
 export function MoliCard(props: MoliCardProps) {
   const { t } = props
+  if (props.view === 'summary') {
+    return t('description')
+  }
+
   const state = props.useMoliCard(snapshot => snapshot)
   const disabled = !state.writable
   const backend = state.backend.text === 'cdp' ? 'cdp' : 'local'
@@ -65,17 +78,12 @@ export function MoliCard(props: MoliCardProps) {
   return (
     <PluginCard
       copy={{
-        expand: t('expand'),
-        collapse: t('collapse'),
-        unsaved: t('unsaved'),
         readOnly: t('readOnly'),
         saveFailed: t('saveFailed'),
         discard: t('discard'),
         save: t('save'),
         saving: t('saving'),
       }}
-      title={t('title')}
-      description={t('description')}
       state={state}
       onSave={props.save}
       onDiscard={props.discard}

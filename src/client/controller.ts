@@ -4,9 +4,8 @@
  * @module dsh-web-fetch-moli/client/controller
  */
 
-import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ConfigForm, CardShell, CardFieldState, CardActions, SnapshotStore } from './form.ts'
 import { CardForm, checkboxField, numberField, radioField, textField } from './form.ts'
-import type { CardShell, CardFieldState, CardActions, SnapshotStore } from './form.ts'
 
 /** Settings namespace this card edits. */
 export const WEB_FETCH_MOLI_NS = 'web-fetch-moli'
@@ -53,7 +52,7 @@ export class MoliCardController {
   private readonly form: CardForm<MoliSettings>
   private readonly store: SnapshotStore<MoliCardState>
 
-  constructor(scope: SettingsScope<MoliSettings>) {
+  constructor(scope: ConfigForm<MoliSettings>) {
     this.form = new CardForm(
       scope,
       [
@@ -92,5 +91,9 @@ export class MoliCardController {
 
   inject(): MoliCardFace {
     return { hooks: { moliCard: this.store }, ...this.form.actions() }
+  }
+
+  dispose(): void {
+    this.form.dispose()
   }
 }

@@ -7,6 +7,8 @@ import {
   getMoliReleaseAsset,
   getPluginPackageVersion,
   isExecutableFile,
+  isNewerVersion,
+  parseSemVer,
   resolveCdpBackend,
   resolveMoliBinary,
   syncLatestMoliOnPluginUpdate,
@@ -59,6 +61,24 @@ describe('moli-resolve', () => {
   it('getPluginPackageVersion returns valid semver from package.json', () => {
     const ver = getPluginPackageVersion()
     expect(ver).toMatch(/^\d+\.\d+\.\d+/)
+  })
+
+  it('parseSemVer parses semver strings accurately', () => {
+    expect(parseSemVer('1.1.9')).toEqual([1, 1, 9])
+    expect(parseSemVer('v1.1.9')).toEqual([1, 1, 9])
+    expect(parseSemVer('0.5.1-alpha.1')).toEqual([0, 5, 1])
+    expect(parseSemVer('invalid')).toBeNull()
+  })
+
+  it('isNewerVersion compares semver versions correctly', () => {
+    expect(isNewerVersion('1.1.9', '1.1.8')).toBe(true)
+    expect(isNewerVersion('1.1.8', '1.1.9')).toBe(false)
+    expect(isNewerVersion('1.1.9', '1.1.9')).toBe(false)
+    expect(isNewerVersion('2.0.0', '1.9.9')).toBe(true)
+    expect(isNewerVersion('1.2.0', '1.1.9')).toBe(true)
+    expect(isNewerVersion('1.1.9', '1.2.0')).toBe(false)
+    expect(isNewerVersion('1.1.9', '1.1.9-beta.1')).toBe(true)
+    expect(isNewerVersion('1.1.9-beta.1', '1.1.9')).toBe(false)
   })
 
   it('getLocalMoliVersion inspects binary version string', async () => {

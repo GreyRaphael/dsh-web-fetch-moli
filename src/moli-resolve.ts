@@ -255,31 +255,101 @@ export async function fetchLatestMoliReleaseTag(): Promise<string | null> {
   return null
 }
 
+/** In-flight binary sync promises keyed by destination directory. */
+const inFlightSyncs = new Map<string, Promise<void>>()
+
+/** Default check interval for Moli upstream releases (24 hours). */
+export const DEFAULT_MOLI_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000
+
+/** Options for syncing Moli binary. */
+export interface SyncMoliOptions {
+  /** Force remote release check even if TTL or plugin version stamp is fresh. */
+  forceCheck?: boolean
+  /** Custom check interval budget in ms (defaults to 24h). */
+  checkIntervalMs?: number
+}
+
+/** Parse a three-component semver string into [major, minor, patch]. */
+export function parseSemVer(ver: string): [number, number, number] | null {
+  const m = ver.trim().match(/^v?(\d+)\.(\d+)\.(\d+)/)
+  if (!m || m[1] === undefined || m[2] === undefined || m[3] === undefined) return null
+  return [parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10)]
+}
+
+/** Check whether `remote` version is strictly newer than `local` version. */
+export function isNewerVersion(remote: string, local: string): boolean {
+  const r = parseSemVer(remote)
+  const l = parseSemVer(local)
+  if (!r || !l) return remote !== local
+  if (r[0] !== l[0]) return r[0] > l[0]
+  if (r[1] !== l[1]) return r[1] > l[1]
+  if (r[2] !== l[2]) return r[2] > l[2]
+  // If core major.minor.patch is equal, a stable release is newer than a prerelease
+  if (local.includes('-') && !remote.includes('-')) return true
+  return false
+}
+
 /**
- * Ensures the cached Moli binary (~/.cache/moli/moli) is updated to the latest
- * official GitHub release whenever dsh-web-fetch-moli is upgraded or first installed.
+ * Ensures the cached Moli binary (~/.cache/moli/moli) is kept up-to-date with
+ * the latest official GitHub release.
  *
- * A marker file (~/.cache/moli/.plugin-version) records the last checked plugin version.
- * If the current plugin version matches the marker, returns immediately (0 network overhead).
+ * Checks remote releases when:
+ *  1. The target Moli binary does not exist on disk;
+ *  2. The plugin itself was just upgraded (`currentPluginVersion !== savedPluginVersion`);
+ *  3. More than 24 hours have elapsed since the last remote check (TTL expired);
+ *  4. Explicitly requested via `options.forceCheck`.
+ *
+ * Otherwise returns immediately (fast path, 0 network overhead).
+ *
+ * @param destinationDir - directory to save the binary into (defaults to `~/.cache/moli`).
+ * @param options - check options (forceCheck, checkIntervalMs).
  */
-export async function syncLatestMoliOnPluginUpdate(destinationDir?: string): Promise<void> {
+export async function syncLatestMoliBinary(
+  destinationDir?: string,
+  options?: SyncMoliOptions,
+): Promise<void> {
   const userHome = homedir()
   const destDir = destinationDir ?? join(userHome, '.cache', 'moli')
   const stampFile = join(destDir, '.plugin-version')
   const currentPluginVersion = getPluginPackageVersion()
 
+  const isWindows = process.platform === 'win32'
+  const binName = isWindows ? 'moli.exe' : 'moli'
+  const targetBinaryPath = join(destDir, binName)
+
   let savedPluginVersion = ''
+  let lastCheckedTime = 0
   try {
     if (existsSync(stampFile)) {
-      savedPluginVersion = readFileSync(stampFile, 'utf-8').trim()
+      const content = readFileSync(stampFile, 'utf-8').trim()
+      if (content.startsWith('{')) {
+        const parsed = JSON.parse(content) as { pluginVersion?: string; checkedAt?: number }
+        savedPluginVersion = parsed.pluginVersion ?? ''
+        lastCheckedTime = typeof parsed.checkedAt === 'number' ? parsed.checkedAt : 0
+      } else {
+        savedPluginVersion = content
+        lastCheckedTime = statSync(stampFile).mtimeMs
+      }
     }
   } catch {
     // Ignore read errors
   }
 
-  // Skip if plugin has already checked for this version
-  if (savedPluginVersion === currentPluginVersion) {
+  const now = Date.now()
+  const interval = options?.checkIntervalMs ?? DEFAULT_MOLI_CHECK_INTERVAL_MS
+  const isFresh = isExecutableFile(targetBinaryPath)
+    && (savedPluginVersion === currentPluginVersion)
+    && (now >= lastCheckedTime && now - lastCheckedTime < interval)
+
+  // Skip remote check if fresh unless explicitly forced
+  if (!options?.forceCheck && isFresh) {
     return
+  }
+
+  // Deduplicate concurrent check/download requests for the same directory
+  const existingSync = inFlightSyncs.get(destDir)
+  if (existingSync !== undefined && !options?.forceCheck) {
+    return existingSync
   }
 
   // In test environment, skip remote GitHub check unless explicitly opted in
@@ -287,32 +357,43 @@ export async function syncLatestMoliOnPluginUpdate(destinationDir?: string): Pro
     return
   }
 
-  const isWindows = process.platform === 'win32'
-  const binName = isWindows ? 'moli.exe' : 'moli'
-  const targetBinaryPath = join(destDir, binName)
+  const syncPromise = (async () => {
+    try {
+      const [latestReleaseVer, localVer] = await Promise.all([
+        fetchLatestMoliReleaseTag(),
+        getLocalMoliVersion(targetBinaryPath),
+      ])
 
-  try {
-    const [latestReleaseVer, localVer] = await Promise.all([
-      fetchLatestMoliReleaseTag(),
-      getLocalMoliVersion(targetBinaryPath),
-    ])
+      if (latestReleaseVer !== null) {
+        if (localVer === null || isNewerVersion(latestReleaseVer, localVer)) {
+          console.info(
+            `[dsh-web-fetch-moli] New Moli release available: ${localVer ?? 'missing'} -> v${latestReleaseVer}. ` +
+            `Updating Moli binary...`,
+          )
+          await downloadLatestMoliBinary(destDir, { forceOverwrite: true })
+        }
 
-    if (latestReleaseVer !== null) {
-      if (localVer === null || localVer !== latestReleaseVer) {
-        console.info(
-          `[dsh-web-fetch-moli] Plugin updated to v${currentPluginVersion}. ` +
-          `Upgrading Moli binary: ${localVer ?? 'missing'} -> v${latestReleaseVer}...`,
+        // Only stamp when remote check actually succeeded
+        mkdirSync(destDir, { recursive: true })
+        writeFileSync(
+          stampFile,
+          JSON.stringify({ pluginVersion: currentPluginVersion, checkedAt: Date.now() }),
+          'utf-8',
         )
-        await downloadLatestMoliBinary(destDir, { forceOverwrite: true })
       }
+    } catch (err: unknown) {
+      console.warn('[dsh-web-fetch-moli] Check/update latest Moli release failed (offline fallback):', err)
     }
+  })().finally(() => {
+    inFlightSyncs.delete(destDir)
+  })
 
-    mkdirSync(destDir, { recursive: true })
-    writeFileSync(stampFile, currentPluginVersion, 'utf-8')
-  } catch (err: unknown) {
-    console.warn('[dsh-web-fetch-moli] Check/update latest Moli release failed (offline fallback):', err)
-  }
+  inFlightSyncs.set(destDir, syncPromise)
+  return syncPromise
 }
+
+/** Backward-compatibility alias. */
+export const syncLatestMoliOnPluginUpdate = syncLatestMoliBinary
 
 /**
  * Resolve the Moli executable path.

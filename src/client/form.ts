@@ -13,7 +13,40 @@
  * @module dsh-web-fetch-moli/client/form
  */
 
-import type { SettingsScope, SettingsScopeSnapshot } from '@deepseek-ai/dsh-client-runtime/client'
+/** Client-side sync state of one settings namespace. */
+export interface ConfigFormSnapshot<T> {
+  status: 'loading' | 'ready' | 'unavailable'
+  value: T | undefined
+  base: unknown
+  user: unknown
+  revision?: number | undefined
+  writable: boolean
+  mode?: 'host' | 'memory'
+}
+
+/** Configuration form contract over one settings namespace. */
+export interface ConfigForm<T> {
+  getSnapshot(): ConfigFormSnapshot<T>
+  subscribe(listener: () => void): () => void
+  set(field: string, value: unknown): Promise<boolean | void>
+  unset(field: string): Promise<boolean | void>
+}
+
+/** Context service interface for configForms. */
+export interface ConfigForms {
+  get<T = unknown>(namespace: string): ConfigForm<T>
+  whileServed(namespaces: readonly string[], register: (served: ReadonlySet<string>) => () => void): () => void
+}
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    configForms: ConfigForms
+  }
+}
+
+/** Backward-compatibility aliases. */
+export type SettingsScope<T> = ConfigForm<T>
+export type SettingsScopeSnapshot<T> = ConfigFormSnapshot<T>
 
 /** The write one field's staged draft performs when the card is saved. */
 export type FieldWrite =
@@ -172,19 +205,26 @@ export class CardForm<T> {
   private readonly specs: Map<string, CardFieldSpec>
   private readonly staged = new Map<string, StagedEdit>()
   private readonly listeners = new Set<() => void>()
+  private readonly unsubscribe: (() => void) | undefined
   private saving = false
   private failed = false
 
   /**
-   * @param scope - the bound settings scope for this card's namespace.
+   * @param scope - the configuration form for this card's namespace.
    * @param specs - the section fields this card edits.
    */
   constructor(
-    private readonly scope: SettingsScope<T>,
+    private readonly scope: ConfigForm<T>,
     specs: CardFieldSpec[],
   ) {
     this.specs = new Map(specs.map(spec => [spec.field, spec]))
-    scope.subscribe(() => { this.publish() })
+    this.unsubscribe = scope.subscribe(() => { this.publish() })
+  }
+
+  /** Release listeners and subscriptions. */
+  dispose(): void {
+    this.unsubscribe?.()
+    this.listeners.clear()
   }
 
   /**
@@ -333,7 +373,7 @@ export class CardForm<T> {
     return spec
   }
 
-  private snapshotOf(): SettingsScopeSnapshot<T> {
+  private snapshotOf(): ConfigFormSnapshot<T> {
     return this.scope.getSnapshot()
   }
 
