@@ -35,6 +35,7 @@ export { CdpConnectionPool } from './cdp-pool.ts'
 export type { CdpAcquireMode, CdpConnect, CdpLease } from './cdp-pool.ts'
 export { MoliProcessManager, getFreePort, checkCdpEndpointHealthy } from './moli-process.ts'
 export {
+  CARD_ITEMS_SELECTOR,
   forceLayoutMaterialization,
   MICRO_CLIP_VIEWPORT,
   scrollIntoViewNative,

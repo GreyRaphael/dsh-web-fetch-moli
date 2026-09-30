@@ -87,7 +87,16 @@ export interface NativeScrollResult {
 }
 
 /**
- * Execute native W3C standard scrollIntoView({ block: 'nearest', inline: 'nearest' })
+ * The card/item selector shared by the scroll rounds ({@link scrollIntoViewNative}),
+ * the SPA settle, and the sentinel batch wait — one constant so every site
+ * counts the same elements and round-over-round growth comparisons stay
+ * meaningful. Header/nav chrome is excluded so category navbars cannot pose
+ * as content cards.
+ */
+export const CARD_ITEMS_SELECTOR = '[role="feed"] > article, [role="feed"] > div, [class*="grid" i] > div, [class*="card" i]:not(header *):not(nav *), [class*="model" i], [class*="entry" i]:not(header *):not(nav *)'
+
+/**
+ * Execute native W3C standard scrollIntoView({ block: 'end', inline: 'nearest' })
  * on infinite scroll sentinels or trailing cards.
  */
 export async function scrollIntoViewNative(page: CdpPage): Promise<NativeScrollResult> {
@@ -101,7 +110,7 @@ export async function scrollIntoViewNative(page: CdpPage): Promise<NativeScrollR
           '[class*="sentinel" i], [class*="loadmore" i], [class*="load-more" i], [class*="infinite" i], [class*="loading" i], [id*="sentinel" i], [id*="loadmore" i]'
         );
         const cards = document.querySelectorAll(
-          '[role="feed"] > *, [class*="grid" i] > *, [class*="card" i], [class*="item" i]'
+          '${CARD_ITEMS_SELECTOR}'
         );
         let target = sentinel || (cards.length > 0 ? cards[cards.length - 1] : null);
         if (!target) {
@@ -112,7 +121,7 @@ export async function scrollIntoViewNative(page: CdpPage): Promise<NativeScrollR
         }
         let scrolled = false;
         if (target && typeof target.scrollIntoView === 'function') {
-          target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+          target.scrollIntoView({ block: 'end', inline: 'nearest' });
           scrolled = true;
         }
         return {

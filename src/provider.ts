@@ -13,7 +13,7 @@
 
 import { WebError } from '@deepseek-ai/dsh-web'
 import type { WebFetchProvider, WebFetchRequest, WebFetchResult } from '@deepseek-ai/dsh-web'
-import { CHALLENGE_DOM_PROBE, CHALLENGE_FINISH_RESERVE_MS, CHALLENGE_POLL_INTERVAL_MS, classifyChallengeHtml, classifyChallengeResponse, isChallengeCompatibleResponse } from './challenge.ts'
+import { CHALLENGE_DOM_PROBE, CHALLENGE_DOM_VERDICT_PROBE, CHALLENGE_FINISH_RESERVE_MS, CHALLENGE_POLL_INTERVAL_MS, classifyChallengeHtml, classifyChallengeResponse, isChallengeCompatibleResponse } from './challenge.ts'
 import type { ChallengeVerdict } from './challenge.ts'
 import {
   DEFAULT_CHALLENGE_RETRIES,
@@ -31,7 +31,7 @@ import {
 import type { ResolvedConfig } from './config.ts'
 import { CdpConnectionPool } from './cdp-pool.ts'
 import type { CdpConnect, CdpLease } from './cdp-pool.ts'
-import { forceLayoutMaterialization, scrollIntoViewNative, setupPageHooks } from './hooks.ts'
+import { CARD_ITEMS_SELECTOR, forceLayoutMaterialization, scrollIntoViewNative, setupPageHooks } from './hooks.ts'
 import { htmlToMarkdown } from './markdown.ts'
 import { MoliProcessManager } from './moli-process.ts'
 import { resolveCdpBackend, resolveMoliBinary } from './moli-resolve.ts'
@@ -472,13 +472,21 @@ export class MoliFetchProvider implements WebFetchProvider {
             WEB_FETCH_CHALLENGE_CODE,
           )
         }
+        challengeEntryResponse = null
         response = await page.goto(url.toString(), { waitUntil: 'domcontentloaded', timeout: deadline.remainingMs() })
         tracker?.seed(response)
       }
     }
 
-    // Wait for client-rendered SPA / micro-frontend to settle out of skeleton/spinner
-    if (response === null || response.status() === 200) {
+    const finalResponse = (challengeWaitMs > 0 ? tracker?.last() : undefined) ?? response
+    const clearedWithoutNavigation = challengeEntryResponse !== null && finalResponse === challengeEntryResponse
+    const statusCode = finalResponse !== null && !clearedWithoutNavigation ? finalResponse.status() : 200
+
+    // Wait for client-rendered SPA / micro-frontend to settle out of skeleton/spinner.
+    // A challenge that cleared in place (no navigation) keeps the 403 goto
+    // response while the live document is the cleared page — settle it too, or
+    // exactly the SPA interstitials that need the settle most would skip it.
+    if (response === null || statusCode === 200) {
       await this.settleDynamicSpa(page, deadline)
     }
 
@@ -487,22 +495,30 @@ export class MoliFetchProvider implements WebFetchProvider {
       await this.runSentinelRounds(page, deadline)
     }
 
-    const finalResponse = (challengeWaitMs > 0 ? tracker?.last() : undefined) ?? response
     const kind = classifyContentType(finalResponse?.headers()['content-type'])
     if (kind === undefined) {
       throw new WebError(`unsupported content type "${finalResponse?.headers()['content-type'] ?? 'unknown'}"`, 'WEB_UNSUPPORTED_CONTENT_TYPE')
     }
     const finalUrl = page.url()
-    const clearedWithoutNavigation = challengeEntryResponse !== null && finalResponse === challengeEntryResponse
-    const statusCode = finalResponse !== null && !clearedWithoutNavigation ? finalResponse.status() : 200
 
     if (kind === 'text') {
       const text = finalResponse !== null ? await finalResponse.text() : await page.content()
       return capResult(finalUrl, statusCode, { kind: 'text', content: text })
     }
 
-    // Best-effort short settle for client-rendered scripts
-    await page.waitForLoadState?.('networkidle', { timeout: Math.min(SETTLE_MS, deadline.remainingMs()) }).catch(() => {})
+    // Best-effort short settle for client-rendered scripts:
+    // Only wait networkidle if the live document is sparse (less than 500 chars of text),
+    // avoiding the flat 500ms timeout on already settled/scrolled rich SPAs and static docs.
+    if (typeof page.waitForLoadState === 'function') {
+      const isSparse = typeof page.evaluate === 'function'
+        ? await page.evaluate(`
+            Boolean(!document.body || (document.body.innerText || document.body.textContent || '').trim().length < 500)
+          `).catch(() => true)
+        : true
+      if (isSparse) {
+        await page.waitForLoadState('networkidle', { timeout: Math.min(SETTLE_MS, deadline.remainingMs()) }).catch(() => {})
+      }
+    }
 
     const html = await page.content()
     if (config.denoise === false) {
@@ -519,66 +535,118 @@ export class MoliFetchProvider implements WebFetchProvider {
    * Settle client-rendered SPAs and micro-frontends before extracting content.
    * - Static, server-rendered, or unit-test fake pages return immediately.
    * - Skeleton shells / loading spinners wait until content cards/text have mounted into the DOM.
+   * - Uses in-page MutationObserver for sub-100ms event-driven response, with fallback polling.
    */
   private async settleDynamicSpa(page: CdpPage, deadline: Deadline): Promise<void> {
     if (typeof page.evaluate !== 'function') return
-    const maxWaitMs = Math.min(25_000, Math.max(10_000, deadline.remainingMs() - 15_000))
+    // Hold 15s back for the sentinel rounds, the content read, and the denoise
+    // pipeline; within what remains, cap the settle itself at 25s.
+    const maxWaitMs = Math.min(25_000, deadline.remainingMs() - 15_000)
     if (maxWaitMs <= 0) return
-    const start = Date.now()
 
-    let pollInterval = 250
-    while (Date.now() - start < maxWaitMs && deadline.remainingMs() > 4_000) {
-      let isUnsettled = false
-      try {
-        isUnsettled = Boolean(await page.evaluate(`
-          (() => {
-            const body = document.body;
-            if (!body) return true;
+    try {
+      await page.evaluate(`
+        ((maxWait) => {
+          return new Promise((resolve) => {
+            const isSettled = () => {
+              const body = document.body;
+              if (!body) return false;
 
-            const root = document.querySelector('#root, #app, [id*="root"]');
-            const cards = document.querySelectorAll('[role="feed"] > *, [class*="grid" i] > *, [class*="card" i], [class*="item" i], [class*="model" i]').length;
-            const sentinel = Boolean(document.querySelector('[class*="sentinel" i], [class*="loadmore" i], [class*="load-more" i], [class*="infinite" i]'));
+              // Exclude header and navigation chrome to prevent false positives (e.g. category navbars)
+              const cards = document.querySelectorAll(
+                '${CARD_ITEMS_SELECTOR}'
+              ).length;
+              const sentinel = Boolean(document.querySelector(
+                '[class*="sentinel" i], [class*="loadmore" i], [class*="load-more" i], [class*="infinite" i]'
+              ));
 
-            // Settled if cards or sentinels have mounted into DOM
-            if (cards >= 5 || sentinel) return false;
+              // 1. Settled if feed/cards or infinite sentinels have mounted into DOM
+              if (cards >= 5 || sentinel) return true;
 
-            const hasSpinner = Boolean(document.querySelector('.ant-spin, .anticon-spin, [class*="spin"], [class*="skeleton"], [class*="loading"]'));
-            if (hasSpinner) return true;
+              const getMeaningfulText = (el) => {
+                if (!el) return 0;
+                const paragraphs = el.querySelectorAll('p, li, article, h1, h2, h3, tr, td');
+                if (paragraphs.length >= 2) {
+                  let sum = 0;
+                  for (let i = 0; i < paragraphs.length; i++) sum += (paragraphs[i].textContent || '').trim().length;
+                  return sum;
+                }
+                return (el.innerText || el.textContent || '').trim().length;
+              };
 
-            // In SPA root containers (#root, #app), require root-internal content rather than outer navbars
-            if (root) {
-              const rootText = (root.innerText || root.textContent || '').trim();
-              const hasContent = cards > 0 || Boolean(root.querySelector('table, article, .markdown-body, [class*="content"]'));
-              if (rootText.length > 300 && hasContent) return false;
-              return true;
+              // 2. In SPA root containers (#root, #app), require root-internal meaningful content
+              const root = document.querySelector('#root, #app, [id*="root"]');
+              if (root) {
+                const rootTextLen = getMeaningfulText(root);
+                const hasContent = cards > 0 || Boolean(root.querySelector('table, article, .markdown-body, [class*="content" i]'));
+                if (rootTextLen > 300 && hasContent) return true;
+                return false;
+              }
+
+              // 3. In main/article containers, require meaningful prose/table text
+              const main = document.querySelector('main, article, [role="main"], .markdown-body, .docs-content');
+              if (main) {
+                const mainTextLen = getMeaningfulText(main);
+                if (mainTextLen > 180 || main.querySelectorAll('table, p, li').length >= 2 || main.querySelector('article')) return true;
+              }
+
+              // 4. Static or document page fallback
+              const text = (body.innerText || body.textContent || '').trim();
+              const hasArticle = Boolean(document.querySelector('article, main, tr, table'));
+              if (hasArticle && text.length > 300) return true;
+              if (text.length > 600) return true;
+
+              // 5. If none of the content criteria are satisfied, check if active spinner/skeleton is present
+              const spinners = document.querySelectorAll(
+                '.ant-spin, .anticon-spin, [class*="spin" i], [class*="skeleton" i], [class*="loading" i]'
+              );
+              for (let i = 0; i < spinners.length; i++) {
+                const s = spinners[i];
+                if (s.closest('header, nav')) continue;
+                if (s.offsetWidth > 0 || s.offsetHeight > 0 || s.getClientRects().length > 0) return false;
+              }
+
+              return false;
+            };
+
+            if (isSettled()) return resolve(true);
+
+            let debounceTimer = null;
+            let observer = null;
+            let fallbackPoll = null;
+            let safetyTimer = null;
+            let resolved = false;
+
+            const finish = () => {
+              if (resolved) return;
+              resolved = true;
+              if (observer) observer.disconnect();
+              if (fallbackPoll) clearInterval(fallbackPoll);
+              if (safetyTimer) clearTimeout(safetyTimer);
+              if (debounceTimer) clearTimeout(debounceTimer);
+              resolve(true);
+            };
+
+            const check = () => {
+              if (isSettled()) {
+                if (debounceTimer) clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(finish, 60);
+              }
+            };
+
+            const target = document.body || document.documentElement;
+            if (typeof MutationObserver !== 'undefined' && target) {
+              observer = new MutationObserver(check);
+              observer.observe(target, { childList: true, subtree: true });
             }
 
-            // If main/article container exists, wait until main-internal content has mounted
-            const main = document.querySelector('main, article, [role="main"], .markdown-body, .docs-content');
-            if (main) {
-              const mainText = (main.innerText || main.textContent || '').trim();
-              if (mainText.length > 200 || main.querySelectorAll('table, p, li').length >= 2) return false;
-              return true;
-            }
-
-            // Static or document page fallback
-            const text = (body.innerText || body.textContent || '').trim();
-            const hasArticle = Boolean(document.querySelector('article, main, tr, table'));
-            if (hasArticle && text.length > 300) return false;
-            if (text.length > 600) return false;
-
-            return true;
-          })()
-        `))
-      } catch {
-        isUnsettled = false
-      }
-
-      if (!isUnsettled) {
-        break
-      }
-      await sleep(Math.min(pollInterval, deadline.remainingMs()))
-      pollInterval = Math.min(800, Math.floor(pollInterval * 1.4))
+            fallbackPoll = setInterval(check, 100);
+            safetyTimer = setTimeout(finish, maxWait);
+          });
+        })(${maxWaitMs})
+      `)
+    } catch {
+      // Best-effort settle
     }
   }
 
@@ -600,8 +668,9 @@ export class MoliFetchProvider implements WebFetchProvider {
         const hasGridOrFeed = Boolean(document.querySelector('[role="feed"], [class*="grid" i]'));
         if (hasGridOrFeed) return false;
         const textLen = (document.body?.innerText || document.body?.textContent || '').trim().length;
-        const hasDocArticle = Boolean(document.querySelector('article, .markdown-body, .docs-content, table'));
-        return textLen > 1500 && hasDocArticle;
+        const article = document.querySelector('article, main, .markdown-body, .docs-content');
+        const articleTextLen = article ? (article.innerText || article.textContent || '').trim().length : 0;
+        return textLen > 600 && articleTextLen > 300;
       })()
     `).catch(() => false)
     if (skipScroll) return
@@ -615,11 +684,20 @@ export class MoliFetchProvider implements WebFetchProvider {
     for (let round = 1; round <= maxRounds; round++) {
       if (deadline.remainingMs() < 4_000) break
 
-      // 1. Force layout materialization so Moli computes physical bounding boxes
-      await forceLayoutMaterialization(page)
+      // 1. Layout materialization on demand: materialize on round 1 to ensure initial layout tree;
+      // on subsequent rounds only trigger if scrolling did not take effect.
+      if (round === 1) {
+        await forceLayoutMaterialization(page)
+      }
 
       // 2. Perform native scrollIntoView on sentinel or trailing card
-      const res = await scrollIntoViewNative(page)
+      let res = await scrollIntoViewNative(page)
+
+      // Fallback layout materialization if first attempt couldn't scroll
+      if (!res.scrolled && round > 1) {
+        await forceLayoutMaterialization(page)
+        res = await scrollIntoViewNative(page)
+      }
 
       // If nothing was scrolled, this page has no scrollable target
       if (!res.scrolled) break
@@ -628,6 +706,10 @@ export class MoliFetchProvider implements WebFetchProvider {
         everHadSentinel = true
       }
 
+      // Stop after 4 rounds for unstructured infinite streams that lack discrete cards
+      // (prevents runaway scrolling on open news portals like Tencent News where "load more" never ends)
+      if (round >= 4 && res.cardsCount === 0) break
+
       // 3. Termination check
       const hasContentChanged = res.cardsCount > 0
         ? res.cardsCount !== lastCount
@@ -635,8 +717,9 @@ export class MoliFetchProvider implements WebFetchProvider {
 
       if (!hasContentChanged) {
         unchangedRounds++
-        // Stop if content stopped growing for 2 consecutive rounds
-        if (unchangedRounds >= 2) {
+        // Stop if content stopped growing for 2 consecutive rounds,
+        // or if sentinel was destroyed and content ceased changing.
+        if (unchangedRounds >= 2 || (everHadSentinel && !res.hasSentinel)) {
           break
         }
       } else {
@@ -651,8 +734,79 @@ export class MoliFetchProvider implements WebFetchProvider {
         }
       }
 
-      // 4. Wait for network response and DOM render of new batch
-      await sleep(Math.min(1200, Math.max(300, deadline.remainingMs() - 4000)))
+      // 4. Adaptive event-driven wait for new batch to load and settle into DOM
+      const maxWait = Math.min(800, Math.max(250, deadline.remainingMs() - 4000))
+      await this.waitForSentinelBatch(page, res.cardsCount, res.htmlLength, maxWait)
+    }
+  }
+
+  /**
+   * Adaptive event-driven wait: listens for DOM mutations and card/content growth
+   * with a short debounce (80ms) rather than a blind static sleep.
+   */
+  private async waitForSentinelBatch(
+    page: CdpPage,
+    prevCards: number,
+    prevHtmlLen: number,
+    maxWaitMs: number,
+  ): Promise<void> {
+    if (typeof page.evaluate !== 'function' || maxWaitMs <= 50) {
+      await sleep(Math.min(maxWaitMs, 250))
+      return
+    }
+
+    try {
+      await page.evaluate(`
+        ((prevCards, prevLen, maxWait) => {
+          return new Promise((resolve) => {
+            const getCards = () => document.querySelectorAll(
+              '${CARD_ITEMS_SELECTOR}'
+            ).length;
+            const getLen = () => (document.documentElement ? document.documentElement.outerHTML.length : 0);
+
+            let debounceTimer = null;
+            let pollInterval = null;
+            let safetyTimer = null;
+            let observer = null;
+            let settled = false;
+            let growthDetected = false;
+
+            const finish = () => {
+              if (settled) return;
+              settled = true;
+              if (observer) observer.disconnect();
+              if (pollInterval) clearInterval(pollInterval);
+              if (safetyTimer) clearTimeout(safetyTimer);
+              if (debounceTimer) clearTimeout(debounceTimer);
+              resolve(true);
+            };
+
+            const check = () => {
+              if (settled) return;
+              const curCards = getCards();
+              const curLen = getLen();
+              if (curCards > prevCards || curLen > prevLen + 80) {
+                // Batch growth detected: debounce 80ms to allow current batch render to settle
+                if (!growthDetected) {
+                  growthDetected = true;
+                  debounceTimer = setTimeout(finish, 80);
+                }
+              }
+            };
+
+            const target = document.body || document.documentElement;
+            if (typeof MutationObserver !== 'undefined' && target) {
+              observer = new MutationObserver(check);
+              observer.observe(target, { childList: true, subtree: true });
+            }
+
+            pollInterval = setInterval(check, 25);
+            safetyTimer = setTimeout(finish, maxWait);
+          });
+        })(${prevCards}, ${prevHtmlLen}, ${maxWaitMs})
+      `)
+    } catch {
+      await sleep(Math.min(maxWaitMs, 250))
     }
   }
 
@@ -664,6 +818,19 @@ export class MoliFetchProvider implements WebFetchProvider {
       return 'none'
     }
     if (response === null || classifyContentType(response.headers()['content-type']) === 'html') {
+      // Classify the LIVE document in-page first: only the verdict string
+      // crosses CDP, so a plain 200 behind a Cloudflare edge (most protected
+      // zones) no longer ships the whole document just to hear `none`. Pages
+      // that cannot run the probe — no evaluate, an unexpected result, a
+      // throw — fall back to the content round trip.
+      if (typeof page.evaluate === 'function') {
+        try {
+          const verdict = await page.evaluate(CHALLENGE_DOM_VERDICT_PROBE)
+          if (verdict === 'none' || verdict === 'challenge' || verdict === 'blocked') return verdict
+        } catch {
+          // Fall through to the content-based classification
+        }
+      }
       try {
         return classifyChallengeHtml(await page.content())
       } catch {

@@ -6,10 +6,11 @@
  * context intact, the popup guard), plus one real-socket case for the CDP
  * connect failure path — and the bounded Cloudflare-challenge wait (A/B
  * baseline vs feature on, SPA clears, same-page retries, hard blocks,
- * aborts).
+ * aborts, the in-page verdict probe, and the budget-aware SPA settle).
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WebError } from '@deepseek-ai/dsh-web'
+import { CHALLENGE_DOM_VERDICT_PROBE, classifyChallengeHtml } from '../src/challenge.ts'
 import type { ResolvedConfig } from '../src/config.ts'
 import { CdpConnectionPool } from '../src/cdp-pool.ts'
 import { MoliFetchProvider, WEB_FETCH_CHALLENGE_CODE } from '../src/provider.ts'
@@ -21,6 +22,8 @@ interface FakePageSpec {
   finalUrl?: string
   status?: number
   contentType?: string
+  /** Extra response headers (e.g. a Cloudflare edge's `cf-ray`). */
+  headers?: Record<string, string>
   html?: string
   textBody?: string
   gotoError?: Error
@@ -71,12 +74,31 @@ interface FakePageState {
   pageClosed: boolean
   /** How many `goto` calls the page served. */
   gotos: number
+  /** Every script string the page's `evaluate` ran, in order. */
+  scripts: string[]
+  /** How many full-document `content()` reads the page served. */
+  contentCalls: number
 }
+
+/** Test-only observability riding on a fake session. */
+interface FakeSessionProbe {
+  closed: { pageClosed: boolean; context: boolean; browser: boolean; gotos: number }
+  evaluatedScripts: string[]
+  contentCalls: () => number
+}
+
+/** Read a fake provider's last session counters (scripts run, documents read). */
+function probeSession(provider: { lastSession: MoliBrowserSession | undefined }): FakeSessionProbe {
+  return provider.lastSession as unknown as FakeSessionProbe
+}
+
+/** A substring only the settle probe's script carries. */
+const SETTLE_SCRIPT_MARKER = 'ant-spin'
 
 function fakeResponse(spec: FakePageSpec, entry?: NonNullable<FakePageSpec['gotoScript']>[number]): CdpResponse | null {
   if (spec.gotoError !== undefined) return null
   const challenge = entry?.challenge === true || (entry === undefined && spec.challenge === true)
-  const headers: Record<string, string> = { 'content-type': entry?.contentType ?? spec.contentType ?? 'text/html; charset=utf-8' }
+  const headers: Record<string, string> = { ...spec.headers, 'content-type': entry?.contentType ?? spec.contentType ?? 'text/html; charset=utf-8' }
   if (challenge) headers['cf-mitigated'] = 'challenge'
   return {
     status: () => entry?.status ?? spec.status ?? (challenge ? 403 : 200),
@@ -131,6 +153,10 @@ function makeFakePage(spec: FakePageSpec, state: FakePageState, popupListeners: 
     }
   }
 
+  /** The document the LIVE page currently shows. */
+  const currentHtml = (): string =>
+    onChallenge() ? CHALLENGE_HTML : currentEntry()?.html ?? spec.html ?? ARTICLE_HTML
+
   const page: CdpPage = {
     goto: (): Promise<CdpResponse | null> => {
       // A closed page rejects navigation, like a real browser page.
@@ -148,9 +174,9 @@ function makeFakePage(spec: FakePageSpec, state: FakePageState, popupListeners: 
     },
     url: () => spec.finalUrl ?? 'https://final.example.com/docs',
     content: async () => {
+      state.contentCalls++
       noteRead()
-      if (onChallenge()) return CHALLENGE_HTML
-      return currentEntry()?.html ?? spec.html ?? ARTICLE_HTML
+      return currentHtml()
     },
     close: async () => {
       state.pageClosed = true
@@ -161,8 +187,13 @@ function makeFakePage(spec: FakePageSpec, state: FakePageState, popupListeners: 
       else responseListeners.push(listener as (response: CdpResponse) => void)
     },
     ...(spec.noEvaluate === true ? {} : {
-      evaluate: async (): Promise<unknown> => {
+      evaluate: async (script: string | ((...args: unknown[]) => unknown), _arg?: unknown): Promise<unknown> => {
+        state.scripts.push(typeof script === 'string' ? script : '')
         noteRead()
+        // The verdict probe classifies the live document in-page and returns
+        // the verdict string; every other script (settle wait, sentinel
+        // rounds) reports the page's challenge flag instead.
+        if (script === CHALLENGE_DOM_VERDICT_PROBE) return classifyChallengeHtml(currentHtml())
         return onChallenge()
       },
     }),
@@ -172,7 +203,7 @@ function makeFakePage(spec: FakePageSpec, state: FakePageState, popupListeners: 
 }
 
 function fakeSession(spec: FakePageSpec): MoliBrowserSession {
-  const pageState: FakePageState = { pageClosed: false, gotos: 0 }
+  const pageState: FakePageState = { pageClosed: false, gotos: 0, scripts: [], contentCalls: 0 }
   const closed = { context: false, browser: false }
   const page = makeFakePage(spec, pageState)
   const context: CdpContext = {
@@ -193,7 +224,9 @@ function fakeSession(spec: FakePageSpec): MoliBrowserSession {
       get context() { return closed.context },
       get browser() { return closed.browser },
     },
-  } as unknown as MoliBrowserSession & { closed: { pageClosed: boolean; context: boolean; browser: boolean; gotos: number } }
+    evaluatedScripts: pageState.scripts,
+    contentCalls: () => pageState.contentCalls,
+  } as unknown as MoliBrowserSession & FakeSessionProbe
 }
 
 /** The provider under test: a fixed config and an injected fake session. */
@@ -293,7 +326,7 @@ function fakeCdpConnection(spec: FakePageSpec = {}) {
   }
   const makePage = (): CdpPage => {
     state.pagesOpened++
-    const pageState = { pageClosed: false, gotos: 0 }
+    const pageState: FakePageState = { pageClosed: false, gotos: 0, scripts: [], contentCalls: 0 }
     const page = makeFakePage(spec, pageState, state.popupListeners)
     const base = page.close.bind(page)
     return {
@@ -804,7 +837,7 @@ describe('MoliFetchProvider CDP backend', () => {
     await provider.fetch({ url: 'https://example.com/popup-spawner' })
     expect(state.popupListeners.length).toBeGreaterThan(0) // the guard attached
 
-    const popupState = { pageClosed: false, gotos: 0 }
+    const popupState: FakePageState = { pageClosed: false, gotos: 0, scripts: [], contentCalls: 0 }
     const popup = makeFakePage({}, popupState)
     for (const listener of state.popupListeners) listener(popup) // page spawned a popup
     expect(popupState.pageClosed).toBe(true)
@@ -928,12 +961,16 @@ describe('MoliFetchProvider cloudflare challenge wait', () => {
     expect(counters(provider).pageClosed).toBe(true)
   })
 
-  it('A7 SPA clear (no navigation, no new response): the DOM probe sees the swap and the result reads 200', async () => {
+  it('A7 SPA clear (no navigation, no new response): the DOM probe sees the swap, the settle runs, and the result reads 200', async () => {
     const provider = new FakeProvider({ challengeWaitMs: 3_000 }, { challenge: true, clearAfterProbes: 3 })
     const result = await provider.fetch({ url: 'https://example.com/spa-guarded' })
     expect(result.statusCode).toBe(200)
     expect(bodyOf(result)).toContain('World')
     expect(counters(provider).gotos).toBe(1)
+    // The clear happened in place, so the goto response is still the 403 — the
+    // settle gate must read past it (regression: it used to skip the settle
+    // exactly here, and an SPA interstitial would extract its skeleton shell).
+    expect(probeSession(provider).evaluatedScripts.some(script => script.includes(SETTLE_SCRIPT_MARKER))).toBe(true)
   })
 
   it('A8 no evaluate on the page: the probe falls back to content polling and still clears', async () => {
@@ -975,5 +1012,63 @@ describe('MoliFetchProvider cloudflare challenge wait', () => {
     expect(result.statusCode).toBe(200)
     expect(bodyOf(result)).toContain('World')
     expect(counters(provider).gotos).toBe(2)
+  })
+
+  it('A11 a plain-200 Cloudflare-edge page is classified in-page: no wait, one document read', async () => {
+    // `cf-ray` + `server: cloudflare` open the suspicion gate on a 200, so the
+    // verdict must come from the in-page probe: only the verdict string
+    // crosses CDP, and the document itself is serialized exactly once — for
+    // the extraction, not for the classification (regression: this used to
+    // ship the whole document for the Node-side classifier).
+    const provider = new FakeProvider({ challengeWaitMs: 5_000 }, {
+      status: 200,
+      headers: { 'cf-ray': '8f2aabc123-lax', server: 'cloudflare' },
+      html: ARTICLE_HTML,
+    })
+    const result = await provider.fetch({ url: 'https://example.com/protected-but-fine' })
+    expect(result.statusCode).toBe(200)
+    expect(bodyOf(result)).toContain('World')
+    const session = probeSession(provider)
+    expect(session.evaluatedScripts).toContain(CHALLENGE_DOM_VERDICT_PROBE)
+    expect(session.contentCalls()).toBe(1)
+    expect(counters(provider).gotos).toBe(1)
+  })
+
+  it('A12 a challenge retry that lands on a non-200 page does not run the SPA settle', async () => {
+    // Round 1 fails to clear and retries; the retry lands on an error page (404).
+    // The settle gate must not run on this 404 (regression: challengeEntryResponse
+    // leaking from the first round used to make the settle believe this was an in-place clear).
+    const provider = new FakeProvider({ challengeWaitMs: 300, challengeRetries: 1 }, {
+      neverClears: true,
+      gotoScript: [
+        { challenge: true },
+        { status: 404, html: '<!doctype html><html><head><title>Not Found</title></head><body><h1>404 Not Found</h1></body></html>' },
+      ],
+    })
+    const result = await provider.fetch({ url: 'https://example.com/retry-to-404' })
+    expect(result.statusCode).toBe(404)
+    expect(counters(provider).gotos).toBe(2)
+    expect(probeSession(provider).evaluatedScripts.some(script => script.includes(SETTLE_SCRIPT_MARKER))).toBe(false)
+  })
+})
+
+/** The budget-aware SPA settle: its 15s reserve for the later stages is real. */
+describe('MoliFetchProvider SPA settle budget', () => {
+  it('settles a plain 200 page when the budget can afford it', async () => {
+    // Control: the default 90s budget leaves the settle its full window.
+    const provider = new FakeProvider()
+    const result = await provider.fetch({ url: 'https://example.com/spacious' })
+    expect(result.statusCode).toBe(200)
+    expect(probeSession(provider).evaluatedScripts.some(script => script.includes(SETTLE_SCRIPT_MARKER))).toBe(true)
+  })
+
+  it('skips the settle when the remaining budget cannot cover its reserve', async () => {
+    // 12s of budget: paying a 10s settle would leave nothing for the sentinel
+    // rounds, the content read, and the denoise pipeline (regression: a 10s
+    // floor used to run the settle regardless of the reserve).
+    const provider = new FakeProvider({ challengeWaitMs: 0, timeoutMs: 12_000 })
+    const result = await provider.fetch({ url: 'https://example.com/tight-budget' })
+    expect(result.statusCode).toBe(200)
+    expect(probeSession(provider).evaluatedScripts.some(script => script.includes(SETTLE_SCRIPT_MARKER))).toBe(false)
   })
 })

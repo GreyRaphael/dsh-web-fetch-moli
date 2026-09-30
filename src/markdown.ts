@@ -127,12 +127,15 @@ export function htmlToMarkdown(html: string, url: string): DenoiseResult {
       const targetText = doc.body?.textContent?.trim() ?? ''
       const articleText = article.textContent?.trim() ?? ''
 
-      // Guard against Readability false-positives on catalogs, dashboards, and SPAs:
+      // Guard against Readability false-positives on catalogs, dashboards, portals, and feeds:
       // Readability is tuned for paragraph-heavy prose articles. When pages are catalogs,
-      // grids, or micro-frontends (like model markets or product lists), Readability frequently
-      // latches onto a tiny footer/disclaimer paragraph (< 500 chars) and discards the entire
-      // body text (> 1500 chars). In such cases, prefer the cleaned document body / main container.
-      const isTinyArticleFraction = targetText.length > 1500 && (articleText.length * 3 < targetText.length) && articleText.length < 1500
+      // portals, or feeds (like news homepages or model markets), Readability frequently
+      // latches onto a footer/disclaimer widget and discards the vast majority of the
+      // page's content. In such cases, prefer the cleaned document body / main container.
+      const isTinyArticleFraction = targetText.length > 1500 && (
+        (articleText.length * 3 < targetText.length && articleText.length < 1500) ||
+        (targetText.length > 3000 && articleText.length * 2.5 < targetText.length && articleText.length < 3500)
+      )
       const isCardHeavyBody = (doc.querySelectorAll?.('[class*="card"], [class*="item"], [class*="model"]').length ?? 0) >= 5 && articleText.length < 1000
 
       if (isTinyArticleFraction || isCardHeavyBody) {

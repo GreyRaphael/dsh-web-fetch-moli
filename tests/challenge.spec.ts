@@ -2,12 +2,14 @@
  * Challenge detection, pure-function coverage: the response-level verdicts
  * (cf-mitigated header, the 403/503 + cloudflare fallback), the content-level
  * verdicts (localized title family, structural markers, the hard-block page),
- * false-positive guards (pages that merely mention Cloudflare), and a
- * DOM-double execution check of the in-page probe.
+ * false-positive guards (pages that merely mention Cloudflare), and
+ * DOM-double execution checks of the in-page probes — including the verdict
+ * probe's fixture-by-fixture equivalence with the Node-side classifier.
  */
 import { describe, expect, it } from 'vitest'
 import {
   CHALLENGE_DOM_PROBE,
+  CHALLENGE_DOM_VERDICT_PROBE,
   CHALLENGE_FINISH_RESERVE_MS,
   CHALLENGE_POLL_INTERVAL_MS,
   CHALLENGE_TITLE_RE,
@@ -15,6 +17,7 @@ import {
   classifyChallengeResponse,
   isChallengeCompatibleResponse,
 } from '../src/challenge.ts'
+import type { ChallengeVerdict } from '../src/challenge.ts'
 
 /** A typical managed-challenge interstitial (English). */
 const CHALLENGE_HTML = `<!doctype html><html lang="en"><head><title>Just a moment...</title></head>
@@ -178,6 +181,48 @@ describe('classifyChallengeHtml', () => {
 
   it('empty html is none', () => {
     expect(classifyChallengeHtml('')).toBe('none')
+  })
+})
+
+describe('CHALLENGE_DOM_VERDICT_PROBE', () => {
+  /**
+   * Compile the verdict probe and run it against a document double built from
+   * serialized HTML the way a real page exposes it: the title separately, the
+   * rest of the document as `documentElement.innerHTML`.
+   */
+  function runVerdictProbe(html: string): ChallengeVerdict {
+    const title = /<title[^>]*>([^<]*)<\/title>/i.exec(html)?.[1]?.trim() ?? ''
+    const fn = new Function('document', `return (${CHALLENGE_DOM_VERDICT_PROBE})`)
+    return fn({ title, documentElement: { innerHTML: html } }) as ChallengeVerdict
+  }
+
+  it('compiles as a standalone expression returning a verdict', () => {
+    expect(() => { new Function('document', `return (${CHALLENGE_DOM_VERDICT_PROBE})`) }).not.toThrow()
+    expect(runVerdictProbe('')).toBe('none')
+  })
+
+  it('returns the same verdict as classifyChallengeHtml, fixture by fixture', () => {
+    // The two classifiers read the same baked-in constants; pin them to
+    // identical verdicts on every family so the in-page mirror cannot drift.
+    const fixtures: Array<[string, ChallengeVerdict]> = [
+      [CHALLENGE_HTML, 'challenge'],
+      ['<html><head><title>Just a moment...</title></head><body></body></html>', 'challenge'],
+      ['<html><body><div id="challenge-running"></div></body></html>', 'challenge'],
+      ['<html><body><script>window._cf_chl_opt={}</script></body></html>', 'challenge'],
+      ['<html><body><div class="footer"><div class="footer-inner"><span class="ray-id">Ray ID: x</span></div></div></body></html>', 'challenge'],
+      ['<html><head><title>Attention Required! | Cloudflare</title></head><body></body></html>', 'blocked'],
+      ['<html><body><div class="cf-error-details"><h1>you have been blocked</h1></div></body></html>', 'blocked'],
+      [ARTICLE_ABOUT_CLOUDFLARE, 'none'],
+      [JSD_BOOTSTRAP_PAGE, 'none'],
+      [JSD_DIRECT_PAGE, 'none'],
+      ['<!doctype html><html><head><title>When you have been blocked</title></head><body><main><article><p>So you have been blocked by your proxy — here is how to tell.</p></article></main></body></html>', 'none'],
+      ['', 'none'],
+    ]
+    for (const [html, expected] of fixtures) {
+      const label = `fixture ${JSON.stringify(html.slice(0, 60))}`
+      expect(classifyChallengeHtml(html), `node classifier verdict for ${label}`).toBe(expected)
+      expect(runVerdictProbe(html), `probe verdict for ${label}`).toBe(expected)
+    }
   })
 })
 

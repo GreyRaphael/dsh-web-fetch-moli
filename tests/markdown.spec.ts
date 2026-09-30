@@ -247,4 +247,45 @@ describe('htmlToMarkdown', () => {
     expect(markdown).toContain('Parameters: 100B')
     expect(markdown).toContain('Description of model-0')
   })
+
+  /**
+   * A news-portal fixture whose body is a link-heavy story feed plus a
+   * medium prose "about" widget (~2.3k chars). Readability latches onto the
+   * widget — too big for the first tiny-article branch (< 1500) yet under
+   * 40% of the body — so only the second branch (> 3000 body, article < 2.5x
+   * body, article < 3500) can reject it and keep the feed.
+   */
+  function portalFeedPage(entryCount: number): string {
+    const entries = Array.from({ length: entryCount }, (_, i) => `
+      <div>
+        <h3><a href="/story-${i}">Story headline number ${i} about regional developments</a></h3>
+        <p>Summary ${i}: ${'lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor. '.repeat(2)}(${i})</p>
+      </div>`).join('\n')
+    const about = Array.from({ length: 8 }, (_, i) =>
+      `<p>${'About this portal: it aggregates stories and offers editorial coverage of technology sectors. '.repeat(3)}(${i})</p>`).join('\n')
+    return `<!doctype html><html><head><title>Portal</title></head><body>
+<div class="stories">${entries}</div>
+<div class="about"><h2>About</h2>${about}</div>
+</body></html>`
+  }
+
+  it('rejects a medium prose widget on a large feed page (> 3000 body, article < 2.5x) and keeps the feed', () => {
+    // 30 entries put the body at ~9.5k chars against a ~2.3k article: the
+    // first branch cannot fire (article >= 1500), only the second can.
+    const { markdown, mode } = htmlToMarkdown(portalFeedPage(30), 'https://example.com/portal')
+    expect(mode).toBe('document')
+    expect(markdown).toContain('Story headline number 0')
+    expect(markdown).toContain('Story headline number 29')
+    expect(markdown).toContain('About this portal')
+  })
+
+  it('keeps a medium article that is a majority of the body (ratio under 2.5x)', () => {
+    // 10 entries shrink the body to ~4.7k chars against the same ~2.3k
+    // article: the ratio drops below 2.5x, so the widget is a legitimate
+    // article and must NOT be discarded.
+    const { markdown, mode } = htmlToMarkdown(portalFeedPage(10), 'https://example.com/portal')
+    expect(mode).toBe('article')
+    expect(markdown).toContain('About this portal')
+    expect(markdown).not.toContain('Story headline number')
+  })
 })

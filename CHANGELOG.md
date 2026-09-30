@@ -5,6 +5,23 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-09-30
+
+### Changed
+
+- **无限滚动与动态 SPA 水合性能全面重构与通用优化**:
+  - 提取并统一 `CARD_ITEMS_SELECTOR`，将 `scrollIntoView` 默认对齐方式规范为 `{ block: 'end' }`，解决底层基于 `IntersectionObserver` 监听哨兵视口相交的现代无限滚动列表空滚与漏触发问题。
+  - 批次动态哨兵等待（`waitForSentinelBatch`）：引入卡片元素数量与 HTML 总长度双重增量检测与动态防抖机制，大幅缩减单轮等待延迟。
+  - 动态水合门禁（`settleDynamicSpa`）：对主流 SPA（`#root` / `#app`）增加真实内容充实度判断（`rootTextLen > 300` 且包含实质节点），彻底消除微前端骨架屏提前收敛与误判；为静态长文档补充免滚动快速通道（`skipScroll`）。
+  - 实测性能显著提升：复杂微前端无限滚动（如阿里云百炼 189 个模型卡片）抓取耗时从 ~35s-40s 稳定压缩至 ~20s，静态文档与普通 SPA 保持 0.3s-3s 秒级收敛。
+
+- **Moli 守护进程生命周期与并发安全加固**:
+  - 增加启动所有权校验（`this.child !== child`）与孤儿进程防护：当启动过程被并发的 `stop()` 或后续 `ensure()` 抢占替代时，主动通过 `killTree(child)` 销毁失管的旧子进程并抛出自愈重试异常，彻底消除后台僵尸进程泄漏。
+  - 完善多进程并发竞态与超时处理的单元测试覆盖。
+
+- **长列表与新闻门户正文智能识别改进**:
+  - 改进 Readability 对大列表页面中局部侧边 Prose "About" Widget 的误判截断：当页面总长大于 3000 且候选文章占比偏低时，自动保留全量 Feed 内容（如腾讯网要闻等综合门户）。
+
 ## [0.6.0] - 2026-09-26
 
 ### Added

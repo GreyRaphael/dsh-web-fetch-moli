@@ -44,6 +44,7 @@ export class MoliProcessManager {
   private child: ChildProcess | undefined
   private endpoint: string | undefined
   private starting: Promise<string> | undefined
+  private startGeneration = 0
   private stderrBuffer: string[] = []
   private disposed = false
 
@@ -79,6 +80,7 @@ export class MoliProcessManager {
 
     if (this.starting) return this.starting
 
+    const generation = ++this.startGeneration
     const startAttempt = (async () => {
       try {
         const port = await getFreePort()
@@ -104,14 +106,21 @@ export class MoliProcessManager {
           if (this.stderrBuffer.length > 50) this.stderrBuffer.shift()
         })
 
-        child.on('error', (err) => {
-          this.child = undefined
-          this.endpoint = undefined
+        child.on('error', () => {
+          // Ownership check: this child may have been replaced already (a
+          // stop() that timed out, then a fresh ensure()); a stale child's
+          // late error must not deregister its replacement.
+          if (this.child === child) {
+            this.child = undefined
+            this.endpoint = undefined
+          }
         })
 
-        child.on('exit', (code, sig) => {
-          this.child = undefined
-          this.endpoint = undefined
+        child.on('exit', () => {
+          if (this.child === child) {
+            this.child = undefined
+            this.endpoint = undefined
+          }
         })
 
         // A dispose that raced us between getFreePort() and spawn() must not
@@ -130,9 +139,10 @@ export class MoliProcessManager {
           if (this.disposed) {
             throw new Error('moli process manager is disposed; cannot start a new daemon')
           }
-          if (child.exitCode !== null) {
+          if (child.exitCode !== null || child.signalCode !== null) {
+            const code = child.exitCode ?? child.signalCode
             const errOutput = this.stderrBuffer.join('')
-            throw new Error(`moli serve exited prematurely with code ${child.exitCode}: ${errOutput}`)
+            throw new Error(`moli serve exited prematurely with code ${code}: ${errOutput}`)
           }
           if (await checkCdpEndpointHealthy(endpoint, 200)) {
             ready = true
@@ -142,15 +152,35 @@ export class MoliProcessManager {
         }
 
         if (!ready) {
-          await this.stop()
+          // Ownership check: if a replacement ensure() took over this.child,
+          // calling stop() would kill the replacement daemon instead of this one.
+          if (this.child === child) {
+            await this.stop()
+          } else {
+            this.killTree(child)
+          }
           const errOutput = this.stderrBuffer.join('')
           throw new Error(`moli serve failed to become ready within 5s at ${endpoint}: ${errOutput}`)
         }
 
+        if (this.child !== child) {
+          // Ownership check: a stop() or replacement ensure() took over while
+          // this attempt was in flight, so this daemon was never registered —
+          // no later stop() would ever kill it. Kill it here and fail the
+          // caller; a retry joins the live replacement through dedup instead
+          // of leaving an orphan daemon next to it.
+          this.killTree(child)
+          throw new Error('moli serve start was superseded by a stop() or a replacement; retry ensure() to join the live daemon')
+        }
         this.endpoint = endpoint
         return endpoint
       } finally {
-        this.starting = undefined
+        // Ownership check for the dedup slot: stop() clears `starting` while
+        // this attempt is still winding down, and a later ensure() may have
+        // registered its own attempt since — only the latest attempt may
+        // clear the slot, or that ensure()'s dedup would be lost and a third
+        // daemon could be spawned alongside a live one.
+        if (this.startGeneration === generation) this.starting = undefined
       }
     })()
 
@@ -171,10 +201,10 @@ export class MoliProcessManager {
     if (!child) return
 
     try {
-      if (child.exitCode === null) {
+      if (child.exitCode === null && child.signalCode === null) {
         child.kill('SIGTERM')
         const killTimer = setTimeout(() => {
-          if (child.exitCode === null) {
+          if (child.exitCode === null && child.signalCode === null) {
             child.kill('SIGKILL')
           }
         }, 1500)
@@ -216,10 +246,10 @@ export class MoliProcessManager {
   /** Fire-and-forget kill used when a raced spawn must be cleaned up. */
   private killTree(child: ChildProcess): void {
     try {
-      if (child.exitCode === null) {
+      if (child.exitCode === null && child.signalCode === null) {
         child.kill('SIGTERM')
         setTimeout(() => {
-          if (child.exitCode === null) child.kill('SIGKILL')
+          if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
         }, 1500)
       }
     } catch {

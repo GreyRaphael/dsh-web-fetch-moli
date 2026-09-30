@@ -136,6 +136,12 @@ const BLOCKED_BODY_PHRASE = 'you have been blocked'
 /** Structural markers of the hard-block page's classic layout. */
 const BLOCKED_BODY_MARKERS = ['cf-headline', 'cf-error-details', 'cf-block-details']
 
+/**
+ * Crawlee's footer marker pair — checked as a combo so prose or a code sample
+ * quoting one class alone stays clean.
+ */
+const CHALLENGE_FOOTER_MARKERS = ['class="ray-id"', 'class="footer-inner"']
+
 /** The verdicts detection can return. */
 export type ChallengeVerdict = 'none' | 'challenge' | 'blocked'
 
@@ -216,7 +222,7 @@ export function classifyChallengeHtml(html: string): ChallengeVerdict {
   if (CHALLENGE_HTML_MARKERS.some(marker => withoutTelemetry.includes(marker))) return 'challenge'
   // Crawlee's footer marker, as a two-class combo so prose quoting one class
   // alone stays clean.
-  if (lowered.includes('class="ray-id"') && lowered.includes('class="footer-inner"')) return 'challenge'
+  if (CHALLENGE_FOOTER_MARKERS.every(marker => lowered.includes(marker))) return 'challenge'
   return 'none'
 }
 
@@ -242,4 +248,43 @@ export const CHALLENGE_DOM_PROBE = `(() => {
   }
   if (document.querySelector('.footer .footer-inner .ray-id')) return true
   return false
+})()`
+
+/**
+ * The in-page VERDICT probe: classify the LIVE document — `challenge`,
+ * `blocked`, or `none` — exactly the way {@link classifyChallengeHtml}
+ * classifies a serialized one, but with only the verdict string crossing CDP.
+ * Without it every page behind a Cloudflare edge (a plain 200 carrying
+ * `cf-ray`, i.e. most protected zones) would pay a full-document
+ * serialization just to be told `none`. The checks that need the document
+ * text (the hard-block phrase/markers and the marker family scans) run over
+ * the DOM's own innerHTML inside the page.
+ *
+ * Every constant this classifier reads is baked in from the same single
+ * source the Node-side function uses — title regexes, hard-block
+ * phrase/markers, structural markers, the telemetry directory — and
+ * `tests/challenge.spec.ts` pins the two to identical verdicts fixture by
+ * fixture, so the mirror cannot drift silently.
+ *
+ * Callers must treat a result that is not one of the three verdict strings
+ * as "probe unavailable" and fall back to the content round trip.
+ */
+export const CHALLENGE_DOM_VERDICT_PROBE = `(() => {
+  const challengeTitle = new RegExp(${JSON.stringify(CHALLENGE_TITLE_RE.source)}, ${JSON.stringify(CHALLENGE_TITLE_RE.flags)})
+  const blockedTitle = new RegExp(${JSON.stringify(BLOCKED_TITLE_RE.source)}, ${JSON.stringify(BLOCKED_TITLE_RE.flags)})
+  const blockedPhrase = ${JSON.stringify(BLOCKED_BODY_PHRASE)}
+  const blockedMarkers = ${JSON.stringify(BLOCKED_BODY_MARKERS)}
+  const challengeMarkers = ${JSON.stringify(CHALLENGE_HTML_MARKERS)}
+  const footerMarkers = ${JSON.stringify(CHALLENGE_FOOTER_MARKERS)}
+  const telemetryDir = ${JSON.stringify(TELEMETRY_JSD_DIR)}
+  const title = (document.title || '').trim()
+  if (blockedTitle.test(title)) return 'blocked'
+  const root = document.documentElement
+  const html = (root ? root.innerHTML : '').toLowerCase()
+  if (html.includes(blockedPhrase) && blockedMarkers.some(marker => html.includes(marker))) return 'blocked'
+  if (challengeTitle.test(title)) return 'challenge'
+  const withoutTelemetry = html.split(telemetryDir).join('')
+  if (challengeMarkers.some(marker => withoutTelemetry.includes(marker))) return 'challenge'
+  if (footerMarkers.every(marker => html.includes(marker))) return 'challenge'
+  return 'none'
 })()`
