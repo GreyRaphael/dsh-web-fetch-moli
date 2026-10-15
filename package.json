@@ -96,6 +96,7 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.0.1-rc.1 <5",
     "@deepseek-ai/dsh-settings": ">=0.1.2-alpha.0 <0.3.0",
+    "@deepseek-ai/dsh-tools": ">=0.1.2-alpha.0 <0.3.0",
     "@deepseek-ai/dsh-web": ">=0.1.2-alpha.0 <0.3.0"
   },
   "peerDependenciesMeta": {
@@ -103,6 +104,9 @@
       "optional": true
     },
     "@deepseek-ai/dsh-settings": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tools": {
       "optional": true
     },
     "@deepseek-ai/dsh-web": {

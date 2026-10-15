@@ -870,6 +870,28 @@ describe('MoliFetchProvider CDP backend', () => {
     expect((error as WebError).code).toBe('WEB_PROVIDER_ERROR')
     expect((error as WebError).message).toContain('127.0.0.1:1')
   })
+
+  it('passes a WebError from the connection layer through unwrapped (taxonomy preserved)', async () => {
+    // A WebError raised below openSession (e.g. a pool-level timeout) must
+    // keep its own code instead of being re-wrapped as WEB_PROVIDER_ERROR.
+    const provider = new MoliFetchProvider(
+      () => ({
+        backend: 'cdp',
+        moliPath: '',
+        cdpEndpoint: '127.0.0.1:9222',
+        shareBrowserContext: true,
+        bypassCsp: true,
+        autoScrollSentinel: true,
+        denoise: true,
+        challengeWaitMs: 0,
+        challengeRetries: 0,
+      }),
+      async () => { throw new WebError('connection slot expired', 'WEB_FETCH_TIMEOUT') },
+    )
+    const error = await provider.fetch({ url: 'https://example.com/x' }).then(() => { throw new Error('expected rejection') }, (e: unknown) => e)
+    expect(error).toBeInstanceOf(WebError)
+    expect((error as WebError).code).toBe('WEB_FETCH_TIMEOUT')
+  })
 })
 
 /** The bounded Cloudflare-challenge wait, end to end over the fake page. */

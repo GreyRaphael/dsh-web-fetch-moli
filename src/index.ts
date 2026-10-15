@@ -39,6 +39,7 @@ export {
   forceLayoutMaterialization,
   MICRO_CLIP_VIEWPORT,
   scrollIntoViewNative,
+  SENTINEL_SELECTOR,
   setupPageHooks,
 } from './hooks.ts'
 export type { NativeScrollResult } from './hooks.ts'
@@ -57,7 +58,6 @@ export {
   resolveCdpBackend,
   resolveMoliBinary,
   syncLatestMoliBinary,
-  syncLatestMoliOnPluginUpdate,
   withFsLockRetry,
 } from './moli-resolve.ts'
 export type { SyncMoliOptions } from './moli-resolve.ts'
@@ -115,8 +115,10 @@ export function apply(ctx: Context, config: Config): void {
   ctx.effect(() => () => { void provider.dispose() }, 'dsh-web-fetch-moli: cleanup daemon and CDP')
   ctx.web.registerFetchProvider(provider)
 
-  // Proactively warm up / download binary in background on plugin startup
-  if (config.backend !== 'cdp') {
-    void resolveMoliBinary(config.moliPath).catch(() => {})
+  // Proactively warm up / download binary in background on plugin startup.
+  // Read the schema-resolved base, not the raw row: `config` may be undefined
+  // or lack `backend`, while resolvedBase always carries the defaults.
+  if (resolvedBase.backend !== 'cdp') {
+    void resolveMoliBinary(resolvedBase.moliPath).catch(() => {})
   }
 }

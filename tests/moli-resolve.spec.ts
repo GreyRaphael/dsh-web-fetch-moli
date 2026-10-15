@@ -11,7 +11,7 @@ import {
   parseSemVer,
   resolveCdpBackend,
   resolveMoliBinary,
-  syncLatestMoliOnPluginUpdate,
+  syncLatestMoliBinary,
   withFsLockRetry,
 } from '../src/moli-resolve.ts'
 
@@ -101,19 +101,18 @@ describe('moli-resolve', () => {
     }
   })
 
-  it('syncLatestMoliOnPluginUpdate fast-path skips check when version stamp matches', async () => {
+  it('syncLatestMoliBinary fast-path skips check when version stamp matches', async () => {
     const t0 = performance.now()
-    await syncLatestMoliOnPluginUpdate()
+    await syncLatestMoliBinary()
     const elapsed = performance.now() - t0
     // Fast path should complete in under 50ms without network roundtrip
     expect(elapsed).toBeLessThan(100)
   })
 
-  it('resolveCdpBackend returns usable chromium driver', async () => {
-    const { chromium, source } = await resolveCdpBackend()
+  it('resolveCdpBackend returns usable chromium driver', () => {
+    const chromium = resolveCdpBackend()
     expect(chromium).toBeDefined()
     expect(typeof chromium.connectOverCDP).toBe('function')
-    expect(source).toContain('CDP')
   })
 
   it('withFsLockRetry retries transient EBUSY/EPERM locks until success', async () => {

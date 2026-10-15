@@ -58,9 +58,11 @@ export interface CdpPage {
    */
   on?(event: 'response', listener: (response: CdpResponse) => void): unknown
   /**
-   * Evaluate an expression in the page.
+   * Evaluate an expression in the page. String form only — every caller bakes
+   * its arguments into the expression text, so no function-serialization or
+   * arg-marshaling path is offered (or needed).
    */
-  evaluate?(script: string | ((...args: any[]) => any), arg?: unknown): Promise<unknown>
+  evaluate?(script: string): Promise<unknown>
   /** Context reference. */
   context?(): CdpContext
   /** The main frame handle; compare with `request.frame()` for filtering. */

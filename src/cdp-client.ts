@@ -660,12 +660,8 @@ export class NativeCdpPage implements CdpPage {
     return typeof res?.result?.value === 'string' ? res.result.value : ''
   }
 
-  async evaluate(pageFunction: string | ((...args: unknown[]) => unknown), ...args: unknown[]): Promise<unknown> {
+  async evaluate(expression: string): Promise<unknown> {
     if (this.isClosed) throw new Error('Target closed')
-
-    const expression = typeof pageFunction === 'string'
-      ? pageFunction
-      : `(${pageFunction.toString()})(${args.map(a => JSON.stringify(a)).join(',')})`
 
     const res = await this.send('Runtime.evaluate', {
       expression,
@@ -821,8 +817,11 @@ export class NativeCdpResponse implements CdpResponse {
   }
 
   request(): CdpRequest {
+    const resourceType = this._resourceType
     return {
-      resourceType: () => this._resourceType ?? 'document',
+      // Honest absence: CDP may omit `type`; defaulting to 'document' here
+      // would falsify subresource responses as navigations downstream.
+      ...(resourceType === undefined ? {} : { resourceType: () => resourceType }),
       isNavigationRequest: () => this._isNav,
       frame: () => this._mainFrameId,
     }

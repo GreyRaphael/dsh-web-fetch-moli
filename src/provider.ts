@@ -18,8 +18,6 @@ import type { ChallengeVerdict } from './challenge.ts'
 import {
   DEFAULT_CHALLENGE_RETRIES,
   DEFAULT_CHALLENGE_WAIT_MS,
-  DEFAULT_MAX_CONCURRENCY_CDP,
-  DEFAULT_MAX_CONCURRENCY_LOCAL,
   DEFAULT_TIMEOUT_MS,
   effectiveChallengeRetries,
   effectiveChallengeWaitMs,
@@ -31,7 +29,7 @@ import {
 import type { ResolvedConfig } from './config.ts'
 import { CdpConnectionPool } from './cdp-pool.ts'
 import type { CdpConnect, CdpLease } from './cdp-pool.ts'
-import { CARD_ITEMS_SELECTOR, forceLayoutMaterialization, scrollIntoViewNative, setupPageHooks } from './hooks.ts'
+import { CARD_ITEMS_SELECTOR, forceLayoutMaterialization, scrollIntoViewNative, SENTINEL_SELECTOR, setupPageHooks } from './hooks.ts'
 import { htmlToMarkdown } from './markdown.ts'
 import { MoliProcessManager } from './moli-process.ts'
 import { resolveCdpBackend, resolveMoliBinary } from './moli-resolve.ts'
@@ -419,6 +417,11 @@ export class MoliFetchProvider implements WebFetchProvider {
         lease,
       }
     } catch (error: unknown) {
+      // A deadline firing mid-open (throwIfAborted, the post-hooks check) is
+      // NOT an endpoint failure: rethrow it raw so translateError maps it to
+      // WEB_FETCH_TIMEOUT / WEB_ABORTED instead of mislabeling the abort as
+      // WEB_PROVIDER_ERROR (the taxonomy the tools layer retries on).
+      if (error instanceof WebError || deadline.signal.aborted) throw error
       throw new WebError(
         `cannot connect to Moli CDP endpoint ${endpoint}; ${String(error instanceof Error ? error.message : error)}`,
         'WEB_PROVIDER_ERROR',
@@ -556,6 +559,10 @@ export class MoliFetchProvider implements WebFetchProvider {
               const cards = document.querySelectorAll(
                 '${CARD_ITEMS_SELECTOR}'
               ).length;
+              // Deliberately narrower than SENTINEL_SELECTOR: here sentinel
+              // presence means "the feed framework mounted" (a settle signal),
+              // so [class*="loading"] spinners — which signal the OPPOSITE —
+              // and loose id-based matches must not count.
               const sentinel = Boolean(document.querySelector(
                 '[class*="sentinel" i], [class*="loadmore" i], [class*="load-more" i], [class*="infinite" i]'
               ));
@@ -661,9 +668,7 @@ export class MoliFetchProvider implements WebFetchProvider {
     // skip scrolling to save latency.
     const skipScroll = await page.evaluate(`
       (() => {
-        const hasSentinel = Boolean(document.querySelector(
-          '[class*="sentinel" i], [class*="loadmore" i], [class*="load-more" i], [class*="infinite" i], [class*="loading" i], [id*="sentinel" i], [id*="loadmore" i]'
-        ));
+        const hasSentinel = Boolean(document.querySelector('${SENTINEL_SELECTOR}'));
         if (hasSentinel) return false;
         const hasGridOrFeed = Boolean(document.querySelector('[role="feed"], [class*="grid" i]'));
         if (hasGridOrFeed) return false;
@@ -727,8 +732,10 @@ export class MoliFetchProvider implements WebFetchProvider {
         lastCount = res.cardsCount
         lastHtmlLen = res.htmlLength
 
-        // 优化：识别 Sentinel 销毁（此前曾有 Sentinel，现 hasSentinel === false）且卡片已有增量，
-        // 说明触底全量加载完毕，直接快速收敛退出，消除尾部的无效空转轮次
+        // Optimization: the sentinel was destroyed (one existed before, now
+        // hasSentinel === false) while cards still grew — the list bottomed
+        // out and fully loaded, so converge immediately instead of burning
+        // idle rounds at the tail.
         if (everHadSentinel && !res.hasSentinel) {
           break
         }
@@ -943,8 +950,7 @@ async function closeWithGrace(closeable: { close(): Promise<void> } | undefined)
 }
 
 async function defaultCdpConnect(endpoint: string, timeoutMs: number): Promise<CdpBrowser> {
-  const { chromium } = await resolveCdpBackend()
-  return await chromium.connectOverCDP(endpoint, { timeout: timeoutMs })
+  return await resolveCdpBackend().connectOverCDP(endpoint, { timeout: timeoutMs })
 }
 
 

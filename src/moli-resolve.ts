@@ -17,6 +17,7 @@ import {
   chmodSync,
   constants,
   copyFileSync,
+  createReadStream,
   createWriteStream,
   existsSync,
   mkdirSync,
@@ -27,6 +28,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
@@ -392,9 +394,6 @@ export async function syncLatestMoliBinary(
   return syncPromise
 }
 
-/** Backward-compatibility alias. */
-export const syncLatestMoliOnPluginUpdate = syncLatestMoliBinary
-
 /**
  * Resolve the Moli executable path.
  *
@@ -431,7 +430,7 @@ export async function resolveMoliBinary(configuredPath = ''): Promise<string> {
   }
 
   // 3. Automated check: ensure ~/.cache/moli/moli has latest release when plugin updates
-  await syncLatestMoliOnPluginUpdate()
+  await syncLatestMoliBinary()
 
   // 4. Default official GitHub release location (~/.cache/moli/moli)
   const userHome = homedir()
@@ -564,6 +563,8 @@ export async function downloadLatestMoliBinary(
         await pipeline(Readable.fromWeb(response.body as any), createWriteStream(tempArchive))
       }
 
+      await verifyArchiveChecksumIfPublished(tempArchive, downloadUrl)
+
       if (isZip) {
         try {
           await runCommand('tar', ['-xf', tempArchive, '-C', tempExtractDir], { timeout: 60_000 })
@@ -631,6 +632,52 @@ export async function downloadLatestMoliBinary(
   return downloadPromise
 }
 
+/**
+ * Verify the downloaded archive against the upstream `<asset>.sha256` file
+ * when the release publishes one. GreyRaphael/moli currently ships no
+ * checksum assets, so verification is opportunistic: absent checksum →
+ * proceed as today; published checksum → hard-fail the install on mismatch,
+ * so a tampered or truncated archive stops here instead of being chmod'ed
+ * and executed. Runs only on the (rare) download path — never per fetch.
+ */
+async function verifyArchiveChecksumIfPublished(archivePath: string, downloadUrl: string): Promise<void> {
+  const checksumUrl = `${downloadUrl}.sha256`
+  let text: string | null = null
+  try {
+    text = (await runCommand('curl', ['-sfL', '--connect-timeout', '5', '--max-time', '15', checksumUrl], { timeout: 20_000 })).trim()
+  } catch {
+    try {
+      const resp = await fetch(checksumUrl, { signal: AbortSignal.timeout(15_000) })
+      if (resp.ok) text = (await resp.text()).trim()
+    } catch {
+      // No checksum asset reachable — verification stays opportunistic
+    }
+  }
+  if (text === null) return
+  // Accept both the sha256sum format ("<hash>  <filename>") and a bare hash.
+  const expected = text.match(/\b([0-9a-f]{64})\b/i)?.[1]?.toLowerCase()
+  if (expected === undefined) return
+  const actual = await sha256File(archivePath)
+  if (actual !== expected) {
+    throw new Error(
+      `checksum verification failed for ${downloadUrl}: expected sha256 ${expected}, got ${actual}; ` +
+      `refusing to install a tampered or truncated archive`,
+    )
+  }
+  console.info('[dsh-web-fetch-moli] verified Moli archive against upstream sha256 checksum')
+}
+
+/** Stream a file through SHA-256 without buffering it whole in memory. */
+function sha256File(path: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = createHash('sha256')
+    const stream = createReadStream(path)
+    stream.on('data', (chunk) => { hash.update(chunk as Buffer) })
+    stream.on('error', reject)
+    stream.on('end', () => { resolve(hash.digest('hex')) })
+  })
+}
+
 function findBinaryRecursively(dir: string, binName: string): string | undefined {
   const entries = readdirSync(dir, { withFileTypes: true })
   for (const entry of entries) {
@@ -647,15 +694,13 @@ function findBinaryRecursively(dir: string, binName: string): string | undefined
 
 let nativeClient: CdpChromium | undefined
 
-/** Resolve the CDP protocol driver using the native WebSocket client. */
-export async function resolveCdpBackend(): Promise<{ chromium: CdpChromium; source: string }> {
-  if (nativeClient !== undefined) {
-    return { chromium: nativeClient, source: 'native WebSocket CDP client' }
-  }
+/** Resolve the CDP protocol driver (the native WebSocket client, memoized). */
+export function resolveCdpBackend(): CdpChromium {
+  if (nativeClient !== undefined) return nativeClient
   const client: CdpChromium = {
     connectOverCDP: (endpoint: string, options?: { timeout?: number }) =>
       connectCdp(endpoint, options?.timeout ?? 30000),
   }
   nativeClient = client
-  return { chromium: client, source: 'native WebSocket CDP client' }
+  return client
 }

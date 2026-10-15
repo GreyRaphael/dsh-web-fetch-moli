@@ -23,7 +23,7 @@ export const DEFAULT_MAX_CONCURRENCY_LOCAL = 20
  */
 export const DEFAULT_MAX_CONCURRENCY_CDP = 50
 
-/** Ceiling the schema accepts for `maxConcurrency`. */
+/** Ceiling the schema accepts for `maxConcurrency` (mirrored in src/client/controller.ts). */
 export const MAX_CONCURRENCY_CEILING = 200
 
 /**
@@ -31,13 +31,13 @@ export const MAX_CONCURRENCY_CEILING = 200
  */
 export const DEFAULT_CHALLENGE_WAIT_MS = 5_000
 
-/** Ceiling the schema accepts for `challengeWaitMs`. */
+/** Ceiling the schema accepts for `challengeWaitMs` (mirrored in src/client/controller.ts). */
 export const MAX_CHALLENGE_WAIT_MS = 60_000
 
 /** Default same-page re-navigation attempts after a challenge wait runs out. */
 export const DEFAULT_CHALLENGE_RETRIES = 0
 
-/** Ceiling the schema accepts for `challengeRetries`. */
+/** Ceiling the schema accepts for `challengeRetries` (mirrored in src/client/controller.ts). */
 export const MAX_CHALLENGE_RETRIES = 3
 
 /**
@@ -46,7 +46,7 @@ export const MAX_CHALLENGE_RETRIES = 3
  */
 export const DEFAULT_TIMEOUT_MS = 90_000
 
-/** Ceiling the schema accepts for `timeoutMs` (5 minutes). */
+/** Ceiling the schema accepts for `timeoutMs`, 5 minutes (mirrored in src/client/controller.ts). */
 export const MAX_TIMEOUT_MS = 300_000
 
 export type { CdpContextMode, MoliBackend } from './types.ts'

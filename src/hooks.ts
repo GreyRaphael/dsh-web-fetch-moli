@@ -26,16 +26,17 @@ async function sendCdp(page: CdpPage, method: string, params: Record<string, unk
 
 /**
  * Configure page-level CDP settings on a freshly opened page before navigation.
- * Applies the 6 essential non-default CDP configurations:
- * 1. Page.enable
- * 2. Runtime.enable
- * 3. Network.enable
- * 4. Page.setBypassCSP: { enabled: true }
- * 5. Security.setIgnoreCertificateErrors: { ignore: true }
- * 6. Network.setBypassServiceWorker: { bypass: true }
+ * Applies the 3 essential non-default CDP configurations:
+ * 1. Page.setBypassCSP: { enabled } — micro-frontend sandboxes injecting ES
+ *    modules (gated by the bypassCsp setting, default true).
+ * 2. Security.setIgnoreCertificateErrors: { ignore: true } — intranet /
+ *    self-signed / MITM-proxy certificates must not abort the fetch.
+ * 3. Network.setBypassServiceWorker: { bypass: true } — always read live
+ *    content, never a stale Service Worker cache.
  *
- * (Note: Emulation.setDeviceMetricsOverride [1920x1080] and navigator.webdriver=false
- * are already native defaults in Moli's profile).
+ * (Page/Runtime/Network.enable are already sent by the CDP client's page
+ * init; Emulation.setDeviceMetricsOverride [1920x1080] and
+ * navigator.webdriver=false are native defaults in Moli's profile.)
  *
  * @param page - CDP page.
  * @param options - hook options (bypassCsp).
@@ -44,20 +45,12 @@ export async function setupPageHooks(
   page: CdpPage,
   options: { bypassCsp?: boolean } = {},
 ): Promise<void> {
-  // 1. 开启基础协议域 (Page, Runtime, Network)
-  await sendCdp(page, 'Page.enable')
-  await sendCdp(page, 'Runtime.enable')
-  await sendCdp(page, 'Network.enable')
-
-  // 2. 绕过 CSP 限制（受 DSH 前端/全局配置项 config.bypassCsp 控制，默认 true）
   const bypassCsp = options.bypassCsp !== false
-  await sendCdp(page, 'Page.setBypassCSP', { enabled: bypassCsp })
-
-  // 3. 忽略证书错误（防止内网/自签名/代理抓包证书导致连接中断）
-  await sendCdp(page, 'Security.setIgnoreCertificateErrors', { ignore: true })
-
-  // 4. 穿透 Service Worker 缓存（确保获取最新线上内容）
-  await sendCdp(page, 'Network.setBypassServiceWorker', { bypass: true })
+  await Promise.all([
+    sendCdp(page, 'Page.setBypassCSP', { enabled: bypassCsp }),
+    sendCdp(page, 'Security.setIgnoreCertificateErrors', { ignore: true }),
+    sendCdp(page, 'Network.setBypassServiceWorker', { bypass: true }),
+  ])
 }
 
 export const MICRO_CLIP_VIEWPORT = { x: 0, y: 0, width: 1, height: 1, scale: 1 } as const
@@ -96,6 +89,16 @@ export interface NativeScrollResult {
 export const CARD_ITEMS_SELECTOR = '[role="feed"] > article, [role="feed"] > div, [class*="grid" i] > div, [class*="card" i]:not(header *):not(nav *), [class*="model" i], [class*="entry" i]:not(header *):not(nav *)'
 
 /**
+ * The lazy-load sentinel selector shared by the scroll rounds
+ * ({@link scrollIntoViewNative}) and the skip-scroll precheck — one constant
+ * so both look for the same trigger elements. Kept permissive (class AND id,
+ * including `[class*="loading"]`): for scroll targeting, over-matching only
+ * means an extra scrollIntoView candidate. The SPA settle uses a deliberately
+ * narrower variant (see provider.settleDynamicSpa).
+ */
+export const SENTINEL_SELECTOR = '[class*="sentinel" i], [class*="loadmore" i], [class*="load-more" i], [class*="infinite" i], [class*="loading" i], [id*="sentinel" i], [id*="loadmore" i]'
+
+/**
  * Execute native W3C standard scrollIntoView({ block: 'end', inline: 'nearest' })
  * on infinite scroll sentinels or trailing cards.
  */
@@ -106,9 +109,7 @@ export async function scrollIntoViewNative(page: CdpPage): Promise<NativeScrollR
   try {
     const res = await page.evaluate(`
       (() => {
-        const sentinel = document.querySelector(
-          '[class*="sentinel" i], [class*="loadmore" i], [class*="load-more" i], [class*="infinite" i], [class*="loading" i], [id*="sentinel" i], [id*="loadmore" i]'
-        );
+        const sentinel = document.querySelector('${SENTINEL_SELECTOR}');
         const cards = document.querySelectorAll(
           '${CARD_ITEMS_SELECTOR}'
         );

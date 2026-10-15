@@ -63,6 +63,10 @@ export class MoliCardController {
         checkboxField('bypassCsp'),
         checkboxField('autoScrollSentinel'),
         checkboxField('denoise'),
+        // Bounds mirror the server schema ceilings in src/config.ts
+        // (MAX_TIMEOUT_MS / MAX_CONCURRENCY_CEILING / MAX_CHALLENGE_WAIT_MS /
+        // MAX_CHALLENGE_RETRIES). The client bundle's purity gate forbids
+        // value-importing them, so keep the two sides in sync manually.
         numberField('timeoutMs', 1000, 300_000),
         numberField('maxConcurrency', 1, 200),
         numberField('challengeWaitMs', 0, 60_000),

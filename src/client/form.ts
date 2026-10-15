@@ -44,10 +44,6 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-/** Backward-compatibility aliases. */
-export type SettingsScope<T> = ConfigForm<T>
-export type SettingsScopeSnapshot<T> = ConfigFormSnapshot<T>
-
 /** The write one field's staged draft performs when the card is saved. */
 export type FieldWrite =
   | { kind: 'set'; value: unknown }

@@ -6,7 +6,7 @@
 
 /** Locale keys this card renders. */
 export type MoliCardLocaleKey =
-  | 'title' | 'description'
+  | 'description'
   | 'backendLabel' | 'backendLocal' | 'backendLocalHint' | 'backendCdp' | 'backendCdpHint'
   | 'moliPath' | 'moliPathHint' | 'moliPathPlaceholder'
   | 'cdpEndpoint' | 'cdpEndpointHint' | 'cdpEndpointPlaceholder'
@@ -18,8 +18,8 @@ export type MoliCardLocaleKey =
   | 'maxConcurrency' | 'maxConcurrencyHint' | 'maxConcurrencyPlaceholder'
   | 'challengeWaitMs' | 'challengeWaitMsHint' | 'challengeWaitMsPlaceholder'
   | 'challengeRetries' | 'challengeRetriesHint' | 'challengeRetriesPlaceholder'
-  | 'overridden' | 'reset' | 'readOnly' | 'expand' | 'collapse'
-  | 'save' | 'saving' | 'discard' | 'unsaved' | 'saveFailed' | 'invalidText'
+  | 'overridden' | 'reset' | 'readOnly'
+  | 'save' | 'saving' | 'discard' | 'saveFailed' | 'invalidText'
 
 /** This plugin's dictionary namespace, merged into the locale key map. */
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -30,7 +30,6 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 /** English copy. */
 export const en: Record<MoliCardLocaleKey, string> = {
-  title: 'Moli web fetch',
   description: 'Ultra-lightweight web-fetch provider using Moli (Rust headless browser, ~60MB RAM). Supports local managed daemon and remote CDP.',
   backendLabel: 'Backend mode',
   backendLocal: 'Local Moli daemon',
@@ -66,19 +65,15 @@ export const en: Record<MoliCardLocaleKey, string> = {
   overridden: 'Overridden',
   reset: 'Reset to default',
   readOnly: 'This deployment stores settings read-only.',
-  expand: 'Show settings',
-  collapse: 'Hide settings',
   save: 'Save',
   saving: 'Saving…',
   discard: 'Discard',
-  unsaved: 'Unsaved',
   saveFailed: 'The deployment did not accept these values; they were left for you to correct.',
   invalidText: 'This value is not accepted here.',
 }
 
 /** Simplified Chinese copy. */
 export const zh: Record<MoliCardLocaleKey, string> = {
-  title: 'Moli 网页爬取',
   description: '基于 Moli（超轻量 Rust 无头浏览器，仅约 60MB 内存）的网页抓取插件。支持受管本地服务及远程 CDP 集群。',
   backendLabel: '后端运行模式',
   backendLocal: '本地 Moli 服务',
@@ -114,12 +109,9 @@ export const zh: Record<MoliCardLocaleKey, string> = {
   overridden: '已覆盖',
   reset: '恢复默认',
   readOnly: '本部署的设置为只读。',
-  expand: '展开设置',
-  collapse: '收起设置',
   save: '保存',
   saving: '保存中…',
   discard: '放弃修改',
-  unsaved: '未保存',
   saveFailed: '本部署没有接受这些值，已保留供你修改。',
   invalidText: '该值不被此设置项接受。',
 }
