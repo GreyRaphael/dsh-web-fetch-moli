@@ -21,6 +21,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 测试：`tests/config.spec.ts` 增加“每个字段都声明了 volatile”（直接断言新契约的前提，防止再次静默失效）与 `readLive` 的三条取值路径；`tests/cordis-integration.spec.ts` 增加“表单可被投放”“volatile 编辑在下一次操作生效且不重挂插件”“直挂缺字段时回落到文档默认值”。共 176 个测试。
 
+### Changed
+
+- **依赖清单精简（声明项 30 → 24，净删 6 项）**:
+  - 删除 `@deepseek-ai/dsh-settings` 的 dev 声明——迁移后运行时与类型层都不再引用它。
+  - 删除 `@types/mozilla__readability`：`@mozilla/readability` 自 0.6.0 起自带 `index.d.ts`，这份 `@types` 是它的过时影子包，删掉后 `tsc --noEmit` 仍然通过。
+  - 删除 `react-dom` 与 `@types/react-dom`：本插件从不 import `react-dom`（`lib/client.js` 唯一的外部依赖是 `react/jsx-runtime`，由宿主模块表提供）；同时从 `tsconfig.json` 的 `types` 里移除 `react-dom`。
+  - 删除 `@deepseek-ai/dsh-brand`、`@deepseek-ai/dsh-client-ui-settings-plugins` 两个既无 import、也不在 `dsh.client.inject` 里的 devDependencies。
+  - 保留 `@deepseek-ai/dsh-client-store`：它不是直接 import，但 `dsh-client-ui-slots` 的 `.d.ts` 引用它，缺了会让 `InjectFace` 的推断退化成 `any`（`src/client/card.tsx` 随即报 TS7006）——已实测复现。
+  - `linkedom` 由 `^0.18.13` 升到 `^0.18.14`（同一 minor 的 patch）。
+
+- **`react` 与 `@types/react` 有意停留在 18.x（宿主提供的是 18.3.1）**: 宿主 `apps/web` 依赖 `^18.2.0`，浏览器模块表 `PLATFORM_MODULES` 分发的也是 18.3.1，vite 侧还配了 `dedupe: ['react','react-dom']`。升到 19 会与宿主并存两份 React，拆散 hook 与 element identity。
+
 ## [0.6.1] - 2026-09-30
 
 ### Changed

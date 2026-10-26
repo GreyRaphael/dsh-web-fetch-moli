@@ -91,7 +91,7 @@
     "@deepseek-ai/schemastery": ">=3.18.3 <4",
     "@mdream/js": "^1.7.2",
     "@mozilla/readability": "^0.6.0",
-    "linkedom": "^0.18.13"
+    "linkedom": "^0.18.14"
   },
   "optionalDependencies": {
     "mdream": "^1.7.2"
@@ -114,22 +114,16 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.5",
-    "@deepseek-ai/dsh-brand": "0.1.2-alpha.5",
     "@deepseek-ai/dsh-client-locale": "0.2.1-rc.3",
     "@deepseek-ai/dsh-client-store": "0.2.1-rc.3",
     "@deepseek-ai/dsh-client-ui-settings": "0.2.1-rc.3",
-    "@deepseek-ai/dsh-client-ui-settings-plugins": "0.1.2-alpha.5",
     "@deepseek-ai/dsh-client-ui-slots": "0.2.1-rc.3",
-    "@deepseek-ai/dsh-settings": "0.1.2-alpha.5",
     "@deepseek-ai/dsh-tools": "0.2.1-rc.3",
     "@deepseek-ai/dsh-web": "0.2.1-rc.3",
-    "@types/mozilla__readability": "^0.4.2",
     "@types/node": "^24.0.0",
     "@types/react": "^18.3.1",
-    "@types/react-dom": "^18.3.1",
     "lightningcss": "^1.32.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
     "tsdown": "^0.22.2",
     "typescript": "^5.8.0",
     "vitest": "^4.1.8",
