@@ -33,6 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`react` 与 `@types/react` 有意停留在 18.x（宿主提供的是 18.3.1）**: 宿主 `apps/web` 依赖 `^18.2.0`，浏览器模块表 `PLATFORM_MODULES` 分发的也是 18.3.1，vite 侧还配了 `dedupe: ['react','react-dom']`。升到 19 会与宿主并存两份 React，拆散 hook 与 element identity。
 
+- **工具链升级到当前 harness 世代**: `typescript` `^5.8` → `^6.0.3`（与 harness 自身一致）、`tsdown` `^0.22` → `^0.23.2`、`vitest` `^4.1` → `^5.0.5`、`lightningcss` `^1.32` → `^1.33`。为适配 TypeScript 6 的两个破坏性变更：
+  - `tsconfig.json` 去掉 `baseUrl`（TS 6 已弃用，`paths` 改为相对配置文件解析）。
+  - `tsconfig.build.json` 显式声明 `rootDir: "src"`（TS 6 不再从 `include` 推断公共源目录）。
+
 ## [0.6.1] - 2026-09-30
 
 ### Changed

@@ -15,7 +15,6 @@
     "allowImportingTsExtensions": true,
     "noEmit": true,
     "types": ["node", "react"],
-    "baseUrl": ".",
     "paths": {
       "cordis": ["./node_modules/@deepseek-ai/cordis"]
     }
