@@ -17,9 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 依赖世代对齐：devDependencies 升到 `0.2.1-rc.3`（cordis `4.0.5`、schemastery `3.18.5`），schemastery 运行时下限提到 `>=3.18.3`（`.volatile()` 自 3.18.3 才存在），peer 下限提到 `0.1.7-alpha.1`，并新增 `dsh.engines.dsh: ">=0.1.7-alpha.1"` 让版本不满足时安装/激活阶段就明确报错，而不是运行时静默失效。
   - 顺带删除 `pnpm-workspace.yaml` 里锁在 0.1.2 世代的 `overrides`（`dsh-session`/`dsh-invariants`/`dsh-scope`/`dsh-llm`/`dsh-timeout`/`dsh-typert-protocol`），它们让依赖树里同时存在两份 schemastery，并触发 `TS2742`。
 
+- **`provider.ts` 的 `withDefaults` 与 `resolveConfig` 重复维护同一张默认值表**: 改为 `resolveConfig(config)` 转发，只补 `timeoutMs` 这一个 `ResolvedConfig` 允许缺省的字段。同时清掉因此不再使用的三个 `DEFAULT_*` 导入。两张表并存时，改一处忘另一处会让 provider 与 settings 表单对同一个字段给出不同的默认值。
+
 ### Added
 
-- 测试：`tests/config.spec.ts` 增加“每个字段都声明了 volatile”（直接断言新契约的前提，防止再次静默失效）与 `readLive` 的三条取值路径；`tests/cordis-integration.spec.ts` 增加“表单可被投放”“volatile 编辑在下一次操作生效且不重挂插件”“直挂缺字段时回落到文档默认值”。共 176 个测试。
+- 测试：`tests/config.spec.ts` 增加“每个字段都声明了 volatile”（直接断言新契约的前提，防止再次静默失效）与 `readLive` 的三条取值路径；`tests/cordis-integration.spec.ts` 增加“表单可被投放”“volatile 编辑在下一次操作生效且不重挂插件”“直挂缺字段时回落到文档默认值”。共 171 个测试（含 `tests/moli-resolve.spec.ts` 的网络用例）。
+
+- `tests/client-fields.spec.ts`（Node 安全）：覆盖三个 spec 工厂的格式化与拒绝分支，并断言四个数字字段的边界与 Host schema 上限一致（300000 / 200 / 60000 / 3）。
+- 原 `tests/client-form.spec.ts` 删除：它测的是 `CardForm` 这份平台模型的副本。真正需要本插件守护的是自己的 spec 逻辑，而 `SettingsFormModel` 的暂存/保存/回滚语义由平台自己的 `settings-form-model.client.spec.ts` 覆盖。
 
 ### Changed
 
@@ -48,8 +53,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`@types/node` 停留在 24.x**: 与 Node 运行时主版本对齐，跨大版本会引入无关类型噪声。
 
-### Changed
-
 - **客户端改用平台共享的 settings-form 套件，删除 935 行手工转写层**: `form.ts`(396) / `fields.tsx`(195) / `PluginCard.tsx`(71) 及两个 CSS(317) 全部删除，改为使用浏览器壳层已种入冻结模块表的 `@deepseek-ai/dsh-client-ui-primitives` 与 `dsh-client-store`。这些文件头部原本写明“external client bundles cannot value-import `@deepseek-ai/*` packages”——该限制来自插件自己的 purity gate，而 rc.3 的模块表已经开放这两个 specifier，于是限制的前提不再成立。
   - `form.ts` 的 `CardForm` → 平台 `SettingsFormModel`；`ValueField` → `SettingsValueField`；`CheckboxField` → `Checkbox`；`PluginCard` → `SettingsForm`。
   - 插件自己只剩两处平台未覆盖的形状：backend 单选组（它的两个选项要联动禁用其它字段）、以及复选框旁的“已覆盖 + 恢复默认”徽章。二者落在 `card.module.css`（111 行，原为 317 行）。
@@ -57,15 +60,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 数字字段的客户端范围校验**保留**（`settingsBoundedNumberField` 带 min/max）。平台自带的 `settingsNumberField` 不接收边界，直接换用会让越界值直到 Host 才被拒——这是本次唯一刻意偏离平台默认的地方。
 
 - **`package.json` 声明 `dsh.client.external`**: 新增 `@deepseek-ai/dsh-client-store` 与 `@deepseek-ai/dsh-client-ui-primitives` 两个模块表请求，与 `tsdown.config.ts` 的 `PLATFORM_EXTERNALS` 一一对应。两者必须同名，否则 bundle 会 require 一个模块表答不出的 specifier。产物从 36.4KB 降至 21.9KB（−39%），且 `lib/client.js` 只剩三个 require，全部命中模块表。
-
-### Fixed
-
-- **`provider.ts` 的 `withDefaults` 与 `resolveConfig` 重复维护同一张默认值表**: 改为 `resolveConfig(config)` 转发，只补 `timeoutMs` 这一个 `ResolvedConfig` 允许缺省的字段。同时清掉因此不再使用的三个 `DEFAULT_*` 导入。两张表并存时，改一处忘另一处会让 provider 与 settings 表单对同一个字段给出不同的默认值。
-
-### Added
-
-- `tests/client-fields.spec.ts`（Node 安全）：覆盖三个 spec 工厂的格式化与拒绝分支，并断言四个数字字段的边界与 Host schema 上限一致（300000 / 200 / 60000 / 3）。
-- 原 `tests/client-form.spec.ts` 删除：它测的是 `CardForm` 这份平台模型的副本。真正需要本插件守护的是自己的 spec 逻辑，而 `SettingsFormModel` 的暂存/保存/回滚语义由平台自己的 `settings-form-model.client.spec.ts` 覆盖。
 
 ## [0.6.1] - 2026-09-30
 
@@ -191,7 +185,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - 修复判断条件从 `!config.denoise` 改为严格的 `config.denoise === false`，彻底消除未配置时回退为未去噪原始 HTML 并在 100,000 字符处被截断的问题。
     - 将 `DEFAULT_TIMEOUT_MS` 提升至 90s，为多达 10 轮排版物化与网络加载的重型微前端页面（如阿里云百炼 179 张卡片）提供充裕的端到端执行预算。
 
-
 ### Fixed
 
 - **自动穿透与对齐 Preset 预设作用域的 `web_fetch` 超时预算**:
@@ -290,7 +283,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Clean and standardized Moli provider registration**: Standardized provider identity strictly to `moli` (id: `moli`). Cleaned up legacy client radio group form names to `moli-backend`. Added Cordis integration test coverage verifying provider registration into `ctx.web`.
-
 
 ### Fixed
 
