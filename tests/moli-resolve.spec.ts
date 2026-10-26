@@ -92,6 +92,11 @@ describe('moli-resolve', () => {
     }
   })
 
+  // This assertion reaches the real GitHub API, so its budget must exceed
+  // vitest's 5s default: a slow-but-healthy response would otherwise fail as a
+  // timeout instead of exercising the "returns null" branch the assertion is
+  // about. Kept unmocked so a release tag the updater cannot parse still
+  // surfaces here.
   it('fetchLatestMoliReleaseTag fetches remote release tag or returns null on network issues', async () => {
     const tag = await fetchLatestMoliReleaseTag()
     if (tag !== null) {
@@ -99,7 +104,7 @@ describe('moli-resolve', () => {
     } else {
       expect(tag).toBeNull()
     }
-  })
+  }, 30_000)
 
   it('syncLatestMoliBinary fast-path skips check when version stamp matches', async () => {
     const t0 = performance.now()
