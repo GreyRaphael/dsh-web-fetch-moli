@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **依赖清单精简（声明项 30 → 24，净删 6 项）**:
+- **依赖清单精简（声明项 29 → 23，净删 6 项）**:
   - 删除 `@deepseek-ai/dsh-settings` 的 dev 声明——迁移后运行时与类型层都不再引用它。
   - 删除 `@types/mozilla__readability`：`@mozilla/readability` 自 0.6.0 起自带 `index.d.ts`，这份 `@types` 是它的过时影子包，删掉后 `tsc --noEmit` 仍然通过。
   - 删除 `react-dom` 与 `@types/react-dom`：本插件从不 import `react-dom`（`lib/client.js` 唯一的外部依赖是 `react/jsx-runtime`，由宿主模块表提供）；同时从 `tsconfig.json` 的 `types` 里移除 `react-dom`。
