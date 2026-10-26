@@ -64,7 +64,7 @@ dsh plugin --profile web add dsh-web-fetch-moli
 
 ## 设置与配置
 
-在 DSH 设置面板（设置 → 插件 → 插件配置 → *Moli 网页爬取*）中可热更新配置：
+插件的每个配置项都是本行 Config 里的 **volatile 字段**：DSH 的设置域（0.1.7 起）直接按 profile 条目渲染表单，保存即热更新——不重启、也不重挂插件。在 DSH 的「插件」页面打开 *dsh-web-fetch-moli* 即可配置：
 
 | 配置项 | 默认值 | 说明 |
 | --- | --- | --- |

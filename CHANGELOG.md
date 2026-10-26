@@ -5,6 +5,22 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **设置卡片在 DSH 0.1.7+ 完全消失（DSH 0.2.1-rc.3 上表现为“配置项不见了”）**: DSH 在 `0.1.7-alpha.1`（2026-09-22，`601d6761e4` / PR #4587 `feat(settings): project volatile Config through profile-backed forms`）把 `SettingsProvider` 整体换成了 `SettingsForms`，`ctx.settings.installSection` / `register` / `settingsNamespace` 这整套 API 被删除。旧代码调用的结果是一个被 cordis 捕获、只写进启动日志的错误：`TypeError: settingsCtx.settings.installSection is not a function`——插件主体（`moli` fetch provider）照常注册并工作，所以只有设置卡静默消失。本次迁移到新契约：
+  - `src/config.ts`：`Config` 每个字段加 `.volatile()`。这是新契约的**必要条件**——`SettingsForms.describe()` 用 `volatileForm(schema)` 过滤条目，没有任何 volatile 字段的 schema 会被整条跳过、不产生表单。`maxConcurrency` 保持无 schema 默认值（缺省即走后端默认 20/50），因此其类型为 `Volatile<number | undefined>`。
+  - `src/index.ts`：删除 `ctx.inject(['settings'], …installSection…)` 整段。改为 `resolveConfig(config)` 每次操作现读 volatile 引用，`apply(ctx, config = {})` 同时兼容 Loader 传入的引用与直挂（测试/内嵌）传入的普通值。
+  - `src/config.ts` 新增 `readLive` / `resolveConfig` / `ResolvedConfig`（显式接口，不再从 `Required<Config>` 推导，因为后者现在会带 `Volatile` 包装）。
+  - `src/client/index.ts`：`@deepseek-ai/dsh-client-runtime/client` 在 0.2 世代已不存在，`ctx.slots` 现由 `@deepseek-ai/dsh-client-ui-renderer/client` 声明，改为类型导入后者。浏览器半仍注册 `plugins.bundle.config`（key 为 `dsh-web-fetch-moli`）并通过 `ctx.configForms.whileServed(['web-fetch-moli'], …)` 绑定生命周期。
+  - 依赖世代对齐：devDependencies 升到 `0.2.1-rc.3`（cordis `4.0.5`、schemastery `3.18.5`），schemastery 运行时下限提到 `>=3.18.3`（`.volatile()` 自 3.18.3 才存在），peer 下限提到 `0.1.7-alpha.1`，并新增 `dsh.engines.dsh: ">=0.1.7-alpha.1"` 让版本不满足时安装/激活阶段就明确报错，而不是运行时静默失效。
+  - 顺带删除 `pnpm-workspace.yaml` 里锁在 0.1.2 世代的 `overrides`（`dsh-session`/`dsh-invariants`/`dsh-scope`/`dsh-llm`/`dsh-timeout`/`dsh-typert-protocol`），它们让依赖树里同时存在两份 schemastery，并触发 `TS2742`。
+
+### Added
+
+- 测试：`tests/config.spec.ts` 增加“每个字段都声明了 volatile”（直接断言新契约的前提，防止再次静默失效）与 `readLive` 的三条取值路径；`tests/cordis-integration.spec.ts` 增加“表单可被投放”“volatile 编辑在下一次操作生效且不重挂插件”“直挂缺字段时回落到文档默认值”。共 176 个测试。
+
 ## [0.6.1] - 2026-09-30
 
 ### Changed

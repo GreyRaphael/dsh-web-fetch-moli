@@ -62,7 +62,7 @@ After adding, restart `dsh web` to load the plugin.
 
 ## Configuration
 
-The settings card (设置 → 插件 → 插件配置 → *Moli 网页爬取*) configures `web-fetch-moli` in real time:
+Every option is a **volatile field of this row's Config**: since DSH 0.1.7 the settings domain serves the form from the profile entry itself, so a save applies live — no restart and no plugin remount. Open *dsh-web-fetch-moli* on the DSH Plugins page to edit it:
 
 | Field | Default | Description |
 | --- | --- | --- |

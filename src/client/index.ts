@@ -7,8 +7,11 @@
 
 import type { Context } from 'cordis'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
-import type {} from '@deepseek-ai/dsh-client-runtime/client'
+// Type-only: the ctx.configForms Context merge and the ConfigForm contract.
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+// Type-only: the ctx.slots Context merge (`dsh-client-runtime` carried it before 0.2).
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+// Type-only: the 'plugins.bundle.config' SlotMap entry the card registers into.
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
 import { MoliCardController, WEB_FETCH_MOLI_NS } from './controller.ts'
 import { MoliCard } from './card.tsx'
