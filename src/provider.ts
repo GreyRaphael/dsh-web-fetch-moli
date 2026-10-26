@@ -16,15 +16,13 @@ import type { WebFetchProvider, WebFetchRequest, WebFetchResult } from '@deepsee
 import { CHALLENGE_DOM_PROBE, CHALLENGE_DOM_VERDICT_PROBE, CHALLENGE_FINISH_RESERVE_MS, CHALLENGE_POLL_INTERVAL_MS, classifyChallengeHtml, classifyChallengeResponse, isChallengeCompatibleResponse } from './challenge.ts'
 import type { ChallengeVerdict } from './challenge.ts'
 import {
-  DEFAULT_CHALLENGE_RETRIES,
-  DEFAULT_CHALLENGE_WAIT_MS,
-  DEFAULT_TIMEOUT_MS,
   effectiveChallengeRetries,
   effectiveChallengeWaitMs,
   effectiveContextMode,
   effectiveMaxConcurrency,
   effectiveTimeoutMs,
   normalizeCdpEndpoint,
+  resolveConfig,
 } from './config.ts'
 import type { ResolvedConfig } from './config.ts'
 import { CdpConnectionPool } from './cdp-pool.ts'
@@ -269,20 +267,14 @@ function classifyContentType(header: string | undefined): DecodableKind | undefi
   return undefined
 }
 
+/**
+ * `ResolvedConfig` leaves `timeoutMs` optional so a caller can hand over a
+ * section that omits it; every read site wants the module default instead.
+ * The defaults themselves live in `config.ts` — this only fills the one hole
+ * `resolveConfig` can leave, rather than restating the whole table.
+ */
 function withDefaults(config: ResolvedConfig | undefined): ResolvedConfig {
-  return {
-    backend: config?.backend ?? 'local',
-    moliPath: config?.moliPath ?? '',
-    cdpEndpoint: config?.cdpEndpoint ?? '',
-    shareBrowserContext: config?.shareBrowserContext !== false,
-    bypassCsp: config?.bypassCsp !== false,
-    autoScrollSentinel: config?.autoScrollSentinel !== false,
-    denoise: config?.denoise !== false,
-    timeoutMs: config?.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-    challengeWaitMs: config?.challengeWaitMs ?? DEFAULT_CHALLENGE_WAIT_MS,
-    challengeRetries: config?.challengeRetries ?? DEFAULT_CHALLENGE_RETRIES,
-    maxConcurrency: config?.maxConcurrency,
-  }
+  return { ...resolveConfig(config), maxConcurrency: config?.maxConcurrency }
 }
 
 export class MoliFetchProvider implements WebFetchProvider {

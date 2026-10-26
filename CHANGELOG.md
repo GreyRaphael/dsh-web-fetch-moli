@@ -60,6 +60,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`provider.ts` 的 `withDefaults` 与 `resolveConfig` 重复维护同一张默认值表**: 改为 `resolveConfig(config)` 转发，只补 `timeoutMs` 这一个 `ResolvedConfig` 允许缺省的字段。同时清掉因此不再使用的三个 `DEFAULT_*` 导入。两张表并存时，改一处忘另一处会让 provider 与 settings 表单对同一个字段给出不同的默认值。
+
 ### Added
 
 - `tests/client-fields.spec.ts`（Node 安全）：覆盖三个 spec 工厂的格式化与拒绝分支，并断言四个数字字段的边界与 Host schema 上限一致（300000 / 200 / 60000 / 3）。
