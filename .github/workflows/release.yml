@@ -45,6 +45,10 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          # The release body is the checked-in Chinese summary rather than
+          # auto-generated notes: this project's changelog and releases are
+          # written in Chinese, and `generate_release_notes` would replace it
+          # with an English commit list.
+          body_path: .github/release-notes.md
           files: |
             *.tgz
