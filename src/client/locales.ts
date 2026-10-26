@@ -18,7 +18,7 @@ export type MoliCardLocaleKey =
   | 'maxConcurrency' | 'maxConcurrencyHint' | 'maxConcurrencyPlaceholder'
   | 'challengeWaitMs' | 'challengeWaitMsHint' | 'challengeWaitMsPlaceholder'
   | 'challengeRetries' | 'challengeRetriesHint' | 'challengeRetriesPlaceholder'
-  | 'overridden' | 'reset' | 'readOnly'
+  | 'overridden' | 'reset' | 'readOnly' | 'unavailable'
   | 'save' | 'saving' | 'discard' | 'saveFailed' | 'invalidText'
 
 /** This plugin's dictionary namespace, merged into the locale key map. */
@@ -64,6 +64,7 @@ export const en: Record<MoliCardLocaleKey, string> = {
   challengeRetriesPlaceholder: '(default: 0)',
   overridden: 'Overridden',
   reset: 'Reset to default',
+  unavailable: 'This deployment does not serve these settings to the browser.',
   readOnly: 'This deployment stores settings read-only.',
   save: 'Save',
   saving: 'Saving…',
@@ -108,6 +109,7 @@ export const zh: Record<MoliCardLocaleKey, string> = {
   challengeRetriesPlaceholder: '（默认：0）',
   overridden: '已覆盖',
   reset: '恢复默认',
+  unavailable: '本部署未向浏览器提供这些设置。',
   readOnly: '本部署的设置为只读。',
   save: '保存',
   saving: '保存中…',

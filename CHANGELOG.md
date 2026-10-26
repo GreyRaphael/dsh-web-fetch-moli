@@ -48,6 +48,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`@types/node` 停留在 24.x**: 与 Node 运行时主版本对齐，跨大版本会引入无关类型噪声。
 
+### Changed
+
+- **客户端改用平台共享的 settings-form 套件，删除 935 行手工转写层**: `form.ts`(396) / `fields.tsx`(195) / `PluginCard.tsx`(71) 及两个 CSS(317) 全部删除，改为使用浏览器壳层已种入冻结模块表的 `@deepseek-ai/dsh-client-ui-primitives` 与 `dsh-client-store`。这些文件头部原本写明“external client bundles cannot value-import `@deepseek-ai/*` packages”——该限制来自插件自己的 purity gate，而 rc.3 的模块表已经开放这两个 specifier，于是限制的前提不再成立。
+  - `form.ts` 的 `CardForm` → 平台 `SettingsFormModel`；`ValueField` → `SettingsValueField`；`CheckboxField` → `Checkbox`；`PluginCard` → `SettingsForm`。
+  - 插件自己只剩两处平台未覆盖的形状：backend 单选组（它的两个选项要联动禁用其它字段）、以及复选框旁的“已覆盖 + 恢复默认”徽章。二者落在 `card.module.css`（111 行，原为 317 行）。
+  - `controller.ts` 从 103 行降至 116 行且不再包含任何模型逻辑，只声明字段与投影；新 `fields.ts`(73 行) 承载三个 spec 工厂（boolean / 有界整数 / 选项集），并且只用 `import type`，因此在 Node 下可直接测试。
+  - 数字字段的客户端范围校验**保留**（`settingsBoundedNumberField` 带 min/max）。平台自带的 `settingsNumberField` 不接收边界，直接换用会让越界值直到 Host 才被拒——这是本次唯一刻意偏离平台默认的地方。
+
+- **`package.json` 声明 `dsh.client.external`**: 新增 `@deepseek-ai/dsh-client-store` 与 `@deepseek-ai/dsh-client-ui-primitives` 两个模块表请求，与 `tsdown.config.ts` 的 `PLATFORM_EXTERNALS` 一一对应。两者必须同名，否则 bundle 会 require 一个模块表答不出的 specifier。产物从 36.4KB 降至 21.9KB（−39%），且 `lib/client.js` 只剩三个 require，全部命中模块表。
+
+### Fixed
+
+### Added
+
+- `tests/client-fields.spec.ts`（Node 安全）：覆盖三个 spec 工厂的格式化与拒绝分支，并断言四个数字字段的边界与 Host schema 上限一致（300000 / 200 / 60000 / 3）。
+- 原 `tests/client-form.spec.ts` 删除：它测的是 `CardForm` 这份平台模型的副本。真正需要本插件守护的是自己的 spec 逻辑，而 `SettingsFormModel` 的暂存/保存/回滚语义由平台自己的 `settings-form-model.client.spec.ts` 覆盖。
+
 ## [0.6.1] - 2026-09-30
 
 ### Changed

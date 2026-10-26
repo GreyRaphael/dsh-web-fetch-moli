@@ -45,6 +45,10 @@
       "inject": [
         "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-settings"
+      ],
+      "external": [
+        "@deepseek-ai/dsh-client-store",
+        "@deepseek-ai/dsh-client-ui-primitives"
       ]
     },
     "engines": {
@@ -127,6 +131,7 @@
     "tsdown": "^0.23.2",
     "typescript": "^6.0.3",
     "vitest": "^5.0.5",
-    "@deepseek-ai/dsh-client-ui-renderer": "0.2.1-rc.3"
+    "@deepseek-ai/dsh-client-ui-renderer": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-client-ui-primitives": "0.2.1-rc.3"
   }
 }

@@ -1,11 +1,25 @@
 /**
- * The Moli card controller: staged form over the `web-fetch-moli` settings namespace.
+ * The Moli card controller: staged form over the `web-fetch-moli` settings
+ * namespace, built on the platform's shared `SettingsFormModel` instead of a
+ * local copy of it.
+ *
+ * Nothing here styles or tracks state: the model stages drafts, fences writes
+ * with the revision they started from, and republishes through a snapshot
+ * store. This file only says which fields the card edits and how the
+ * projection is shaped.
  *
  * @module dsh-web-fetch-moli/client/controller
  */
 
-import type { ConfigForm, CardShell, CardFieldState, CardActions, SnapshotStore } from './form.ts'
-import { CardForm, checkboxField, numberField, radioField, textField } from './form.ts'
+import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
+import {
+  SettingsFormModel, settingsTextField,
+  type SettingsFieldState, type SettingsFormActions,
+  type SettingsFormScope, type SettingsFormShell,
+} from '@deepseek-ai/dsh-client-ui-primitives'
+import {
+  settingsBooleanField, settingsBoundedNumberField, settingsChoiceField,
+} from './fields.ts'
 
 /** Settings namespace this card edits. */
 export const WEB_FETCH_MOLI_NS = 'web-fetch-moli'
@@ -26,22 +40,22 @@ export interface MoliSettings {
 }
 
 /** What the Moli card renders. */
-export interface MoliCardState extends CardShell {
-  backend: CardFieldState
-  moliPath: CardFieldState
-  cdpEndpoint: CardFieldState
-  shareBrowserContext: CardFieldState
-  bypassCsp: CardFieldState
-  autoScrollSentinel: CardFieldState
-  denoise: CardFieldState
-  timeoutMs: CardFieldState
-  maxConcurrency: CardFieldState
-  challengeWaitMs: CardFieldState
-  challengeRetries: CardFieldState
+export interface MoliCardState extends SettingsFormShell {
+  backend: SettingsFieldState
+  moliPath: SettingsFieldState
+  cdpEndpoint: SettingsFieldState
+  shareBrowserContext: SettingsFieldState
+  bypassCsp: SettingsFieldState
+  autoScrollSentinel: SettingsFieldState
+  denoise: SettingsFieldState
+  timeoutMs: SettingsFieldState
+  maxConcurrency: SettingsFieldState
+  challengeWaitMs: SettingsFieldState
+  challengeRetries: SettingsFieldState
 }
 
 /** The registration-side face the card's slot entry injects. */
-export interface MoliCardFace extends CardActions {
+export interface MoliCardFace extends SettingsFormActions {
   hooks: {
     moliCard: SnapshotStore<MoliCardState>
   }
@@ -49,30 +63,29 @@ export interface MoliCardFace extends CardActions {
 
 /** Bridges the `web-fetch-moli` settings scope onto the card. */
 export class MoliCardController {
-  private readonly form: CardForm<MoliSettings>
+  private readonly form: SettingsFormModel<MoliSettings>
   private readonly store: SnapshotStore<MoliCardState>
 
-  constructor(scope: ConfigForm<MoliSettings>) {
-    this.form = new CardForm(
-      scope,
-      [
-        radioField('backend', ['local', 'cdp']),
-        textField('moliPath'),
-        textField('cdpEndpoint'),
-        checkboxField('shareBrowserContext'),
-        checkboxField('bypassCsp'),
-        checkboxField('autoScrollSentinel'),
-        checkboxField('denoise'),
-        // Bounds mirror the server schema ceilings in src/config.ts
-        // (MAX_TIMEOUT_MS / MAX_CONCURRENCY_CEILING / MAX_CHALLENGE_WAIT_MS /
-        // MAX_CHALLENGE_RETRIES). The client bundle's purity gate forbids
-        // value-importing them, so keep the two sides in sync manually.
-        numberField('timeoutMs', 1000, 300_000),
-        numberField('maxConcurrency', 1, 200),
-        numberField('challengeWaitMs', 0, 60_000),
-        numberField('challengeRetries', 0, 3),
-      ],
-    )
+  /**
+   * @param scope - the shared configuration form for this card's namespace.
+   */
+  constructor(scope: SettingsFormScope<MoliSettings>) {
+    this.form = new SettingsFormModel(scope, [
+      settingsChoiceField('backend', ['local', 'cdp']),
+      settingsTextField('moliPath'),
+      settingsTextField('cdpEndpoint'),
+      settingsBooleanField('shareBrowserContext'),
+      settingsBooleanField('bypassCsp'),
+      settingsBooleanField('autoScrollSentinel'),
+      settingsBooleanField('denoise'),
+      // Bounds mirror the Host schema ceilings in src/config.ts
+      // (MAX_TIMEOUT_MS / MAX_CONCURRENCY_CEILING / MAX_CHALLENGE_WAIT_MS /
+      // MAX_CHALLENGE_RETRIES). See settingsBoundedNumberField.
+      settingsBoundedNumberField('timeoutMs', 1000, 300_000),
+      settingsBoundedNumberField('maxConcurrency', 1, 200),
+      settingsBoundedNumberField('challengeWaitMs', 0, 60_000),
+      settingsBoundedNumberField('challengeRetries', 0, 3),
+    ])
     this.store = this.form.bind(() => this.projection())
   }
 

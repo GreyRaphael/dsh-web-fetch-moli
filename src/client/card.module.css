@@ -1,0 +1,111 @@
+/* The Moli card's own layout, limited to the two shapes the shared
+   `ui-primitives` widgets do not cover: the backend radio group and the
+   override badge that sits beside a checkbox. Everything else — the form
+   frame, value fields, inputs, hints — comes from the shared module. */
+
+.backend {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 0;
+  margin: 0;
+  border: 0;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+}
+
+.backendLegend {
+  padding: 0;
+  margin: 0 0 2px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-primary);
+}
+
+.backendOption {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  align-items: baseline;
+  cursor: pointer;
+}
+
+.backendOption input[type='radio'] {
+  margin: 0;
+  accent-color: var(--dsw-alias-label-primary);
+}
+
+.backendOption input[type='radio']:disabled,
+.backendOption:has(input:disabled) {
+  cursor: default;
+}
+
+.backendLabel {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-primary);
+}
+
+/* A hint under a radio or checkbox aligns to the text column (16px control
+   plus its 8px gap) rather than to the box. */
+.hint {
+  grid-column: 2;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.toggle {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+}
+
+.toggleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.badge {
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 17px;
+  white-space: nowrap;
+  background: var(--dsw-alias-bg-module-platform);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.reset {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.reset:hover:not(:disabled) {
+  color: var(--dsw-alias-label-primary);
+}
+
+.reset:disabled {
+  cursor: default;
+}
+
+/* The checkbox toggle's hint indents to the label column; the radio hints
+   already sit there through the grid. */
+.toggle .hint {
+  margin-left: 24px;
+}
