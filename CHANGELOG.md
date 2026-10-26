@@ -37,6 +37,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `tsconfig.json` 去掉 `baseUrl`（TS 6 已弃用，`paths` 改为相对配置文件解析）。
   - `tsconfig.build.json` 显式声明 `rootDir: "src"`（TS 6 不再从 `include` 推断公共源目录）。
 
+- **`@mdream/js` 与 `mdream` 有意停留在 1.x（不跟随 latest 2.0.3）**: 2.x 把 `data:` URI 的图片源整个丢弃，插件为此专门实现的“base64 载荷替换为 `data:image/png;base64,...3.0KB` 占位符”因此失效，图片在 markdown 里退化成 `![alt]()`，丢失 MIME 与尺寸线索；同时 2.x 不再把 `<title>` 输出到正文（1.x 会）。实测对照（独立 pack 出 1.7.2 与 2.0.3 各跑一遍，避免依赖 node_modules 里已被升级的那一份）：
+
+  ```
+  1.7.2 → ![shot](data:image/png;base64,...3.0KB)
+  2.0.3 → ![shot]()
+  ```
+
+  升级 2.x 需要重写 `elideDataUriImages` 的占位策略，并复核 `tests/markdown.spec.ts` 的两条 data-URI 断言，属独立任务。
+
+- **`@types/node` 停留在 24.x**: 与 Node 运行时主版本对齐，跨大版本会引入无关类型噪声。
+
 ## [0.6.1] - 2026-09-30
 
 ### Changed
