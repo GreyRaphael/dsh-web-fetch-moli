@@ -7,6 +7,7 @@
  * probe's fixture-by-fixture equivalence with the Node-side classifier.
  */
 import { describe, expect, it } from 'vitest'
+import { parseHTML } from 'linkedom'
 import {
   CHALLENGE_DOM_PROBE,
   CHALLENGE_DOM_VERDICT_PROBE,
@@ -105,6 +106,22 @@ describe('isChallengeCompatibleResponse (the suspicion gate)', () => {
   })
 })
 
+/**
+ * Build a DOM double that the in-page probes can run against.
+ *
+ * linkedom provides `querySelector`/`innerHTML`; `document.scripts` is a browser
+ * property linkedom does not implement, so it is defined here as the probe would
+ * see it in a real page.
+ */
+function parseHTMLForProbe(html: string): { document: Record<string, unknown> } {
+  const { document } = parseHTML(html) as unknown as { document: Record<string, unknown> & { querySelectorAll(selector: string): unknown[] } }
+  Object.defineProperty(document, 'scripts', {
+    value: Array.from(document.querySelectorAll('script')),
+    configurable: true,
+  })
+  return { document }
+}
+
 describe('classifyChallengeHtml', () => {
   it('classifies the canonical interstitial through every marker family', () => {
     expect(classifyChallengeHtml(CHALLENGE_HTML)).toBe('challenge')
@@ -113,9 +130,15 @@ describe('classifyChallengeHtml', () => {
     expect(classifyChallengeHtml('<html><body><div id="challenge-form"></div></body></html>')).toBe('challenge')
     expect(classifyChallengeHtml('<html><body><div id="challenge-running"></div></body></html>')).toBe('challenge')
     expect(classifyChallengeHtml('<html><body><iframe id="cf-chl-widget-0001" src="https://challenges.cloudflare.com"></iframe></body></html>')).toBe('challenge')
-    expect(classifyChallengeHtml('<html><body><script>window._cf_chl_opt={}</script></body></html>')).toBe('challenge')
+    // NOT a challenge: the option object alone is prose-level evidence. Tutorials
+    // and incident write-ups quote this exact assignment, so it only counts
+    // together with the "checking your browser" heading (see the weak-signal
+    // tests below).
+    expect(classifyChallengeHtml('<html><body><script>window._cf_chl_opt={}</script></body></html>')).toBe('none')
     expect(classifyChallengeHtml('<html><head><title>Just a moment...</title></head><body></body></html>')).toBe('challenge')
-    expect(classifyChallengeHtml('<html><body>Checking your browser before accessing example.com.</body></html>')).toBe('challenge')
+    // Likewise prose-level on its own; both weak signals together are the real
+    // interstitial (see the next test).
+    expect(classifyChallengeHtml('<html><body>Checking your browser before accessing example.com.</body></html>')).toBe('none')
     expect(classifyChallengeHtml('<html><body><div class="footer"><div class="footer-inner"><span class="ray-id">Ray ID: x</span></div></div></body></html>')).toBe('challenge')
   })
 
@@ -208,7 +231,9 @@ describe('CHALLENGE_DOM_VERDICT_PROBE', () => {
       [CHALLENGE_HTML, 'challenge'],
       ['<html><head><title>Just a moment...</title></head><body></body></html>', 'challenge'],
       ['<html><body><div id="challenge-running"></div></body></html>', 'challenge'],
-      ['<html><body><script>window._cf_chl_opt={}</script></body></html>', 'challenge'],
+      ['<html><body><script>window._cf_chl_opt={}</script></body></html>', 'none'],
+      // Both weak signals together, in a real interstitial shape.
+      ['<html><body><h1>Checking your browser before accessing example.com</h1><script>window._cf_chl_opt = {cvId:"3"}</script></body></html>', 'challenge'],
       ['<html><body><div class="footer"><div class="footer-inner"><span class="ray-id">Ray ID: x</span></div></div></body></html>', 'challenge'],
       ['<html><head><title>Attention Required! | Cloudflare</title></head><body></body></html>', 'blocked'],
       ['<html><body><div class="cf-error-details"><h1>you have been blocked</h1></div></body></html>', 'blocked'],
@@ -254,7 +279,7 @@ describe('CHALLENGE_DOM_PROBE', () => {
   it('reports true while interstitial markers are live in the DOM', () => {
     expect(runProbe(fakeDocument({ title: 'Just a moment...' }))).toBe(true)
     expect(runProbe(fakeDocument({ title: '请稍候…' }))).toBe(true)
-    expect(runProbe(fakeDocument({ selectors: { '#challenge-form, #challenge-running, #challenge-stage, #challenge-error-text': true } }))).toBe(true)
+    expect(runProbe(fakeDocument({ selectors: { '#challenge-form, #challenge-running, #challenge-stage, #challenge-error-text, [name="cf-challenge"]': true } }))).toBe(true)
     expect(runProbe(fakeDocument({ selectors: { '[id^="cf-chl-widget-"]': true } }))).toBe(true)
     expect(runProbe(fakeDocument({ scriptSrcs: ['/cdn-cgi/challenge-platform/h/b/x'] }))).toBe(true)
     expect(runProbe(fakeDocument({ selectors: { '.footer .footer-inner .ray-id': true } }))).toBe(true)
@@ -271,5 +296,129 @@ describe('CHALLENGE_DOM_PROBE', () => {
     expect(CHALLENGE_POLL_INTERVAL_MS).toBeGreaterThan(0)
     // The reserve must cover the 5s networkidle settle plus pipeline headroom.
     expect(CHALLENGE_FINISH_RESERVE_MS).toBeGreaterThanOrEqual(5_000 + 2_000)
+  })
+})
+
+describe('articles that merely mention Cloudflare (false-positive regression)', () => {
+  /** A tutorial whose prose quotes the interstitial's option object. */
+  const TUTORIAL_QUOTES_OPT = `<!doctype html><html><head><title>Reading Cloudflare challenge state in Puppeteer</title></head><body>
+<main><article><h1>Reading Cloudflare challenge state</h1>
+<p>Once the interstitial loads, the page exposes <code>window._cf_chl_opt</code> and you can read
+the challenge id from it before the redirect happens.</p>
+<p>Copy the value out with <code>page.evaluate(() => window._cf_chl_opt.cvId)</code> in your script.</p>
+</article></main></body></html>`
+
+  /** A write-up whose prose quotes the interstitial's visible heading. */
+  const TUTORIAL_QUOTES_PHRASE = `<!doctype html><html><head><title>Debugging a scraper blocked by Cloudflare</title></head><body>
+<main><article><h1>Debugging a blocked scraper</h1>
+<p>Instead of the article you asked for, the response body says
+&ldquo;Checking your browser before accessing example.com&rdquo; and then reloads a few times.</p>
+<p>Here is how to tell that apart from a real 403 error page.</p>
+</article></main></body></html>`
+
+  /** A docs page that shows the assignment inside a fenced code block. */
+  const DOCS_CODE_BLOCK = `<!doctype html><html><head><title>Challenge detection reference</title></head><body>
+<main><article><h1>Challenge detection reference</h1>
+<p>The interstitial declares its configuration inline before any other script runs:</p>
+<pre><code>window._cf_chl_opt = { cvId: "3", cType: "managed" };</code></pre>
+<p>And loads its orchestrate script from <code>/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1</code>.</p>
+<p>Compare that against a normal page, which carries no such assignment outside its telemetry.</p>
+</article></main></body></html>`
+
+  it('does not classify a tutorial that names the option object', () => {
+    // Before the fix this returned 'challenge': the marker list matched
+    // `window._cf_chl_opt` as a bare substring, so the fetch burned its whole
+    // challengeWaitMs (5000ms default) and then failed with
+    // WEB_FETCH_CHALLENGE against a page that had loaded fine.
+    expect(classifyChallengeHtml(TUTORIAL_QUOTES_OPT)).toBe('none')
+  })
+
+  it('does not classify a write-up that quotes the interstitial heading', () => {
+    expect(classifyChallengeHtml(TUTORIAL_QUOTES_PHRASE)).toBe('none')
+  })
+
+  it('does not classify documentation that shows the assignment in a code block', () => {
+    // Code samples are stripped before the weak scan: docs legitimately contain
+    // an exact assignment, and only the surrounding prose reveals the page is
+    // about the interstitial rather than being one.
+    expect(classifyChallengeHtml(DOCS_CODE_BLOCK)).toBe('none')
+  })
+
+  it('still classifies the real interstitial, which carries both weak signals', () => {
+    // The shape Cloudflare actually serves: the heading AND the live inline
+    // assignment, with no code fencing around either.
+    const interstitial = `<html><head><title>Just a moment...</title></head><body>
+<h1>Checking your browser before accessing example.com</h1>
+<script>window._cf_chl_opt = {cvId: "3", cType: "managed"};</script>
+</body></html>`
+    expect(classifyChallengeHtml(interstitial)).toBe('challenge')
+  })
+
+  it('does not classify a page carrying only one of the two weak signals', () => {
+    // Requiring both is what makes the rule structural: either signal alone is
+    // ordinary English or ordinary JavaScript.
+    expect(classifyChallengeHtml('<html><body><h1>Checking your browser before accessing x.com</h1></body></html>')).toBe('none')
+    expect(classifyChallengeHtml('<html><body><script>window._cf_chl_opt = {};</script></body></html>')).toBe('none')
+  })
+
+  it('still classifies on the structural markers, which do not need the weak pair', () => {
+    // A real interstitial keeps its element identities; those are unambiguous,
+    // so they must not be gated behind the weak-signal count.
+    expect(classifyChallengeHtml('<html><body><div id="challenge-stage"></div></body></html>')).toBe('challenge')
+    expect(classifyChallengeHtml('<html><body><div id="challenge-error-text">x</div></body></html>')).toBe('challenge')
+  })
+
+  it('keeps the in-page verdict probe in agreement with the Node classifier', () => {
+    // The two probes disagreed on the tutorial before the fix: the boolean probe
+    // returned false while the verdict probe returned 'challenge', and the
+    // provider prefers the verdict probe — so the false positive won.
+    for (const html of [TUTORIAL_QUOTES_OPT, TUTORIAL_QUOTES_PHRASE, DOCS_CODE_BLOCK]) {
+      const title = /<title[^>]*>([^<]*)<\/title>/i.exec(html)?.[1]?.trim() ?? ''
+      const probe = new Function('document', `return (${CHALLENGE_DOM_VERDICT_PROBE})`)(
+        { title, documentElement: { innerHTML: html } },
+      )
+      expect(probe, `probe must agree with the classifier for ${JSON.stringify(html.slice(0, 50))}`).toBe(classifyChallengeHtml(html))
+    }
+  })
+})
+
+describe('probe agreement without structural markers', () => {
+  /** An interstitial carrying only the weak pair: no id, no orchestrate script. */
+  const WEAK_PAIR_ONLY = `<html><head><title>Just a moment</title></head><body>
+<h1>Checking your browser before accessing example.com</h1>
+<script>window._cf_chl_opt = { cvId: "3" };</script>
+</body></html>`
+
+  it('the boolean probe sees a challenge the structural selectors miss', () => {
+    // realPage has no `#challenge-*` element and no orchestrate script, so the
+    // selector-only probe returned false while the verdict probe returned
+    // 'challenge' — a genuine disagreement between two readers of the same page.
+    const { document } = parseHTMLForProbe(WEAK_PAIR_ONLY)
+    expect(new Function('document', `return (${CHALLENGE_DOM_PROBE})`)(document)).toBe(true)
+  })
+
+  it('all three classification entry points agree on every shape', () => {
+    // classifyChallengeHtml (serialized HTML), the verdict probe (live DOM), and
+    // the boolean probe (live DOM) must not disagree: provider.ts picks between
+    // them by availability, so a disagreement silently changes the verdict.
+    const fixtures: Array<[string, boolean]> = [
+      [WEAK_PAIR_ONLY, true],
+      [ARTICLE_ABOUT_CLOUDFLARE, false],
+      [JSD_BOOTSTRAP_PAGE, false],
+      [JSD_DIRECT_PAGE, false],
+      ['<html><body><article><p>Read about <code>/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1</code> here.</p></article></body></html>', false],
+      ['<html><body><div id="challenge-stage"></div></body></html>', true],
+      ['<html><head><title>Just a moment...</title></head><body></body></html>', true],
+      ['<html><body><p>Ordinary article prose with no markers at all.</p></body></html>', false],
+    ]
+    for (const [html, expected] of fixtures) {
+      const label = JSON.stringify(html.slice(0, 50))
+      const node = classifyChallengeHtml(html)
+      expect(node === 'challenge', `node classifier for ${label}`).toBe(expected)
+      const { document } = parseHTMLForProbe(html)
+      const verdict = new Function('document', `return (${CHALLENGE_DOM_VERDICT_PROBE})`)(document)
+      expect(verdict === 'challenge', `verdict probe for ${label}`).toBe(expected)
+      expect(new Function('document', `return (${CHALLENGE_DOM_PROBE})`)(document), `boolean probe for ${label}`).toBe(expected)
+    }
   })
 })

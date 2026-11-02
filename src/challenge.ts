@@ -102,26 +102,80 @@ export const CHALLENGE_TITLE_RE = new RegExp(
 const TELEMETRY_JSD_DIR = '/cdn-cgi/challenge-platform/scripts/jsd/'
 
 /**
- * Structural markers a challenge document carries in its HTML. Kept in
- * attribute/assignment form (`id="…"`, `window._cf_chl_opt`) rather than bare
- * substrings so an article that merely QUOTES these strings in prose or code
- * samples does not classify — the marker must look like the real element.
- * The bare `/cdn-cgi/challenge-platform/` prefix is checked only after
- * {@link TELEMETRY_JSD_DIR} occurrences are stripped (see
- * {@link classifyChallengeHtml}); `scripts/jsd/main.js` in any spelling is
- * passive telemetry and deliberately absent from this list.
+ * Structural markers a challenge document carries: attribute-form element
+ * identities plus the orchestrate script path. These are safe to match as bare
+ * substrings because each one is a piece of markup an interstitial emits and
+ * ordinary prose does not (`id="challenge-stage"` cannot appear in a sentence
+ * without being escaped, and a page that merely LINKS to the orchestrate path is
+ * stripped of its code blocks before this scan — see
+ * {@link stripCodeSamples}).
+ *
+ * `scripts/jsd/` is passive telemetry and deliberately absent: it is stripped
+ * from the document before the scan (see {@link TELEMETRY_JSD_DIR}).
  */
-const CHALLENGE_HTML_MARKERS = [
+const CHALLENGE_STRUCTURAL_MARKERS = [
   '/cdn-cgi/challenge-platform/',
   'id="cf-chl-widget-',
-  'window._cf_chl_opt',
   'id="challenge-form"',
   'id="challenge-running"',
   'id="challenge-stage"',
   'id="challenge-error-text"',
   'name="cf-challenge"',
-  'checking your browser before accessing',
 ]
+
+/**
+ * Signals that are ALSO ordinary English prose, so one of them alone must never
+ * classify a document.
+ *
+ * `window._cf_chl_opt` and "checking your browser before accessing" both appear
+ * verbatim in tutorials, incident write-ups, and scraper documentation that
+ * quote the interstitial — an article explaining Cloudflare is not a challenge.
+ * A real interstitial, by contrast, carries BOTH: the inline
+ * `window._cf_chl_opt = {…}` assignment AND the "Checking your browser" heading.
+ * So these are counted, not searched: {@link WEAK_CHALLENGE_SIGNAL_COUNT}
+ * distinct hits are required, after code samples are stripped.
+ */
+const CHALLENGE_WEAK_SIGNALS = [
+  'checking your browser before accessing',
+  'window._cf_chl_opt',
+]
+
+/** How many distinct {@link CHALLENGE_WEAK_SIGNALS} a document must carry. */
+const WEAK_CHALLENGE_SIGNAL_COUNT = 2
+
+/**
+ * Remove `<code>`/`<pre>` payloads from a lowercased document before the weak
+ * scan.
+ *
+ * Documentation and tutorials quote markup and inline scripts inside code
+ * blocks; the surrounding prose is the evidence that the page is ABOUT
+ * Cloudflare rather than being a Cloudflare interstitial. The real interstitial
+ * keeps its `window._cf_chl_opt` assignment in a live `<script>` and its
+ * "checking your browser" line in a heading, so neither is removed here.
+ * @param loweredHtml - the document HTML, already lowercased.
+ * @returns the HTML with code sample bodies removed.
+ */
+function stripCodeSamples(loweredHtml: string): string {
+  return loweredHtml.replace(/<(code|pre)\b[^>]*>[\s\S]*?<\/\1>/gi, '')
+}
+
+/**
+ * Count the distinct weak signals present in a code-stripped document.
+ * @param withoutCode - lowercased HTML with code samples removed.
+ * @returns how many of {@link CHALLENGE_WEAK_SIGNALS} occur.
+ */
+function countWeakSignals(withoutCode: string): number {
+  let count = 0
+  for (const signal of CHALLENGE_WEAK_SIGNALS) {
+    // The option object is only a challenge when it is ASSIGNED; a tutorial
+    // naming `window._cf_chl_opt` as a fetch argument is not.
+    const present = signal === 'window._cf_chl_opt'
+      ? /window\._cf_chl_opt\s*=/.test(withoutCode)
+      : withoutCode.includes(signal)
+    if (present) count++
+  }
+  return count
+}
 
 /** Title cores of the hard-block page ("Attention Required! | Cloudflare"). */
 const BLOCKED_TITLE_RE = /^attention required!/i
@@ -219,10 +273,14 @@ export function classifyChallengeHtml(html: string): ChallengeVerdict {
   // can then never confirm a clear, and the fetch dies with
   // WEB_FETCH_CHALLENGE despite the page having loaded fine.
   const withoutTelemetry = lowered.split(TELEMETRY_JSD_DIR).join('')
-  if (CHALLENGE_HTML_MARKERS.some(marker => withoutTelemetry.includes(marker))) return 'challenge'
+  const withoutCode = stripCodeSamples(withoutTelemetry)
+  if (CHALLENGE_STRUCTURAL_MARKERS.some(marker => withoutCode.includes(marker))) return 'challenge'
+  // Weak signals are counted, not searched: one alone is prose (a tutorial
+  // quoting the interstitial), both together are the interstitial itself.
+  if (countWeakSignals(withoutCode) >= WEAK_CHALLENGE_SIGNAL_COUNT) return 'challenge'
   // Crawlee's footer marker, as a two-class combo so prose quoting one class
   // alone stays clean.
-  if (CHALLENGE_FOOTER_MARKERS.every(marker => lowered.includes(marker))) return 'challenge'
+  if (CHALLENGE_FOOTER_MARKERS.every(marker => withoutCode.includes(marker))) return 'challenge'
   return 'none'
 }
 
@@ -239,13 +297,31 @@ export function classifyChallengeHtml(html: string): ChallengeVerdict {
  */
 export const CHALLENGE_DOM_PROBE = `(() => {
   const re = new RegExp(${JSON.stringify(CHALLENGE_TITLE_RE.source)}, ${JSON.stringify(CHALLENGE_TITLE_RE.flags)})
+  const weakSignals = ${JSON.stringify(CHALLENGE_WEAK_SIGNALS)}
+  const weakSignalCount = ${JSON.stringify(WEAK_CHALLENGE_SIGNAL_COUNT)}
+  const telemetryDir = ${JSON.stringify(TELEMETRY_JSD_DIR)}
   if (re.test(document.title.trim())) return true
-  if (document.querySelector('#challenge-form, #challenge-running, #challenge-stage, #challenge-error-text')) return true
+  if (document.querySelector('#challenge-form, #challenge-running, #challenge-stage, #challenge-error-text, [name="cf-challenge"]')) return true
   if (document.querySelector('[id^="cf-chl-widget-"]')) return true
   for (const script of Array.from(document.scripts)) {
     const src = script.getAttribute('src') || ''
-    if (src.includes('/cdn-cgi/challenge-platform/') && !src.includes('/cdn-cgi/challenge-platform/scripts/jsd/')) return true
+    if (src.includes('/cdn-cgi/challenge-platform/') && !src.includes(telemetryDir)) return true
   }
+  // Weak signals, mirroring countWeakSignals(): an interstitial that carries only
+  // the inline option assignment and the "checking your browser" heading — no
+  // structural id, no orchestrate script — is still a challenge. Without this the
+  // boolean probe reported false while the verdict probe reported 'challenge' on
+  // the same document, and provider.ts acts on the verdict.
+  const root = document.documentElement
+  const html = (root ? root.innerHTML : '').toLowerCase()
+  const withoutCode = html.split(telemetryDir).join('').replace(/<(code|pre)\\b[^>]*>[\\s\\S]*?<\\/\\1>/gi, '')
+  let weakHits = 0
+  for (const signal of weakSignals) {
+    if (signal === 'window._cf_chl_opt'
+      ? /window\\._cf_chl_opt\\s*=/.test(withoutCode)
+      : withoutCode.includes(signal)) weakHits++
+  }
+  if (weakHits >= weakSignalCount) return true
   if (document.querySelector('.footer .footer-inner .ray-id')) return true
   return false
 })()`
@@ -274,7 +350,9 @@ export const CHALLENGE_DOM_VERDICT_PROBE = `(() => {
   const blockedTitle = new RegExp(${JSON.stringify(BLOCKED_TITLE_RE.source)}, ${JSON.stringify(BLOCKED_TITLE_RE.flags)})
   const blockedPhrase = ${JSON.stringify(BLOCKED_BODY_PHRASE)}
   const blockedMarkers = ${JSON.stringify(BLOCKED_BODY_MARKERS)}
-  const challengeMarkers = ${JSON.stringify(CHALLENGE_HTML_MARKERS)}
+  const structuralMarkers = ${JSON.stringify(CHALLENGE_STRUCTURAL_MARKERS)}
+  const weakSignals = ${JSON.stringify(CHALLENGE_WEAK_SIGNALS)}
+  const weakSignalCount = ${JSON.stringify(WEAK_CHALLENGE_SIGNAL_COUNT)}
   const footerMarkers = ${JSON.stringify(CHALLENGE_FOOTER_MARKERS)}
   const telemetryDir = ${JSON.stringify(TELEMETRY_JSD_DIR)}
   const title = (document.title || '').trim()
@@ -284,7 +362,18 @@ export const CHALLENGE_DOM_VERDICT_PROBE = `(() => {
   if (html.includes(blockedPhrase) && blockedMarkers.some(marker => html.includes(marker))) return 'blocked'
   if (challengeTitle.test(title)) return 'challenge'
   const withoutTelemetry = html.split(telemetryDir).join('')
-  if (challengeMarkers.some(marker => withoutTelemetry.includes(marker))) return 'challenge'
-  if (footerMarkers.every(marker => html.includes(marker))) return 'challenge'
+  // Code samples are dropped before both the structural and weak scans so an
+  // article quoting /cdn-cgi/challenge-platform/... or window._cf_chl_opt =
+  // inside <code>/<pre> cannot trip either check.
+  const withoutCode = withoutTelemetry.replace(/<(code|pre)\\b[^>]*>[\\s\\S]*?<\\/\\1>/gi, '')
+  if (structuralMarkers.some(marker => withoutCode.includes(marker))) return 'challenge'
+  let weakHits = 0
+  for (const signal of weakSignals) {
+    if (signal === 'window._cf_chl_opt'
+      ? /window\\._cf_chl_opt\\s*=/.test(withoutCode)
+      : withoutCode.includes(signal)) weakHits++
+  }
+  if (weakHits >= weakSignalCount) return 'challenge'
+  if (footerMarkers.every(marker => withoutCode.includes(marker))) return 'challenge'
   return 'none'
 })()`

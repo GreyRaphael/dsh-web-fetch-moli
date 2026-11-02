@@ -26,7 +26,12 @@ describe('dsh-web-fetch-moli Cordis integration', () => {
     expect(provider.available()).toBe(true)
   })
 
-  it('dynamically aligns web_fetch tool timeout with moli budget on tools/execute', async () => {
+  /**
+   * The budget is raised so the provider's own deadline always expires first
+   * (`WEB_FETCH_TIMEOUT`), with the tool layer as a backstop. Equal budgets
+   * would race and let `TOOL_TIMEOUT` mask the specific code.
+   */
+  it('aligns the web_fetch tool budget strictly above the provider deadline', async () => {
     const ctx = new Context()
     await ctx.plugin(WebRuntime, { fetchProvider: 'moli' })
 
@@ -51,7 +56,32 @@ describe('dsh-web-fetch-moli Cordis integration', () => {
     })
 
     expect(executed).toBe(true)
-    expect(toolDef.timeoutMs).toBe(60000)
+    expect(toolDef.timeoutMs).toBeGreaterThan(60000)
+  })
+
+  /**
+   * The registry object is shared, so a mutation that outlives the plugin leaks
+   * into whatever mounts next and into every other agent scope reading the same
+   * definition. Unload must put it back.
+   */
+  it('restores the tool budget on dispose instead of leaving it raised', async () => {
+    const ctx = new Context()
+    await ctx.plugin(WebRuntime, { fetchProvider: 'moli' })
+
+    const toolDef: { name: string; timeoutMs?: number } = { name: 'web_fetch', timeoutMs: 30000 }
+    ctx.provide('tools', { get: (name: string) => name === 'web_fetch' ? toolDef : undefined })
+
+    // Mount through a real fiber so the plugin's effects have an owner to be
+    // disposed with; `apply()` alone would register them on ctx and never run
+    // the cleanup this test is about.
+    const fiber = await ctx.plugin({ name: 'dsh-web-fetch-moli-under-test', inject: ['web'], apply },
+      { backend: 'cdp', timeoutMs: 60000 } as Config)
+
+    await (ctx as any).waterfall('tools/execute', { name: 'web_fetch' }, async () => ({ status: 200 }))
+    expect(toolDef.timeoutMs).toBeGreaterThan(60000)
+
+    await fiber.dispose()
+    expect(toolDef.timeoutMs).toBe(30000)
   })
 
   it('serves the settings form for its own row, with every field volatile', async () => {
@@ -65,7 +95,8 @@ describe('dsh-web-fetch-moli Cordis integration', () => {
     const dict = (Config as unknown as { dict: Record<string, { meta?: { volatile?: boolean } }> }).dict
     expect(Object.keys(dict).sort()).toEqual([
       'autoScrollSentinel', 'backend', 'bypassCsp', 'cdpEndpoint', 'challengeRetries',
-      'challengeWaitMs', 'denoise', 'maxConcurrency', 'moliPath', 'shareBrowserContext', 'timeoutMs',
+      'challengeWaitMs', 'denoise', 'ignoreCertificateErrors', 'maxConcurrency', 'moliPath',
+      'shareBrowserContext', 'timeoutMs',
     ].sort())
     for (const field of Object.keys(dict)) expect(dict[field]?.meta?.volatile).toBe(true)
     expect(WEB_FETCH_MOLI_SETTINGS_NAMESPACE).toBe('web-fetch-moli')
@@ -88,11 +119,15 @@ describe('dsh-web-fetch-moli Cordis integration', () => {
     await Promise.resolve()
 
     await (ctx as any).waterfall('tools/execute', { name: 'web_fetch' }, async () => ({ status: 200 }))
-    expect(toolDef.timeoutMs).toBe(60_000)
+    expect(toolDef.timeoutMs).toBeGreaterThan(60_000)
+    const firstBudget = toolDef.timeoutMs
 
     live.current = Config({ backend: 'cdp', timeoutMs: 120_000 })
     await (ctx as any).waterfall('tools/execute', { name: 'web_fetch' }, async () => ({ status: 200 }))
-    expect(toolDef.timeoutMs).toBe(120_000)
+    // The raised budget tracks the live value rather than sticking at the first
+    // reading — a captured snapshot would leave it at `firstBudget` forever.
+    expect(toolDef.timeoutMs).toBeGreaterThan(120_000)
+    expect(toolDef.timeoutMs).not.toBe(firstBudget)
   })
 
   it('falls back to the documented defaults in a direct mount that omits fields', () => {

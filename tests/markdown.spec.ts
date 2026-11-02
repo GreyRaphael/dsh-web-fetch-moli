@@ -289,3 +289,206 @@ describe('htmlToMarkdown', () => {
     expect(markdown).not.toContain('Story headline number')
   })
 })
+
+describe('article structure preservation', () => {
+  /** The canonical CMS layout: the post's own heading lives inside <header>. */
+  const POST_WITH_HEADER = `<!doctype html>
+<html><head><title>Site — Blog</title></head><body>
+<header><a href="/">Example Corp</a> <nav><a href="/about">About</a></nav></header>
+<main>
+<article>
+<header><h1>Why we rewrote the fetch layer</h1><p class="byline">By Alice</p></header>
+<p>Playwright enables reliable end-to-end testing of modern web apps. It works across all major browsers and captures traces for every run.</p>
+<p>Every once in a while a layer becomes the bottleneck, and this one finally did after months of growth.</p>
+</article>
+</main>
+<footer>© 2026 Example Corp</footer>
+</body></html>`
+
+  it('keeps the heading and byline the article carries inside its own header', () => {
+    const { markdown } = htmlToMarkdown(POST_WITH_HEADER, 'https://example.com/blog/rewrite')
+    // The article's <header><h1> is post structure, not site chrome. Removing it
+    // document-wide (the earlier behavior) deleted the real title and left the
+    // site <title> in its place, so the model saw "Site — Blog" instead of the
+    // post name.
+    expect(markdown).toContain('Why we rewrote the fetch layer')
+    expect(markdown).toContain('By Alice')
+  })
+
+  it('still removes the site header and footer around the article', () => {
+    const { markdown } = htmlToMarkdown(POST_WITH_HEADER, 'https://example.com/blog/rewrite')
+    expect(markdown).not.toContain('About')
+    expect(markdown).not.toContain('© 2026 Example Corp')
+  })
+
+  it('still strips nav/sidebar/ad chrome on a page with no content container', () => {
+    // No <main>/<article> anywhere: nothing is identifiable as content, so chrome
+    // removal falls back to document-wide and the page reads as prose.
+    const page = `<!doctype html><html><head><title>Bare</title></head><body>
+<nav><a href="/">Home</a></nav>
+<footer><a href="/tos">Terms</a></footer>
+<div class="ad banner-ad"><a href="/buy">BUY NOW</a></div>
+<p>A short paragraph of body text that survives the chrome removal and stays readable.</p>
+</body></html>`
+    const { markdown } = htmlToMarkdown(page, 'https://example.com/bare')
+    expect(markdown).toContain('A short paragraph of body text')
+    expect(markdown).not.toContain('Home')
+    expect(markdown).not.toContain('BUY NOW')
+  })
+
+  it('picks the largest container rather than the first in document order', () => {
+    // A promo <article> at the top of the page is the FIRST `article` in tree
+    // order, while the real post is the largest. Selecting by document order
+    // (the earlier behavior) returned the promo and dropped the post.
+    // The card-heavy guard is what forces the fallback container lookup here:
+    // six card elements plus a short extracted article makes Readability's
+    // result untrusted, so the fallback picks a container by text volume.
+    const promo = 'Badge promo copy. '.repeat(20)
+    const post = 'Real content sentence here. '.repeat(20)
+    const cards = Array.from({ length: 6 }, (_, i) => `<div class="card"><h3>Card ${i}</h3><p>brief</p></div>`).join('')
+    const page = `<!doctype html><html><head><title>Portal</title></head><body>
+<article class="badge">${promo}</article>
+<article class="real"><h1>Real Post Heading</h1><p>${post}</p></article>
+${cards}
+</body></html>`
+    const { markdown } = htmlToMarkdown(page, 'https://example.com/portal')
+    expect(markdown).toContain('Real Post Heading')
+    expect(markdown).not.toContain('Badge promo copy')
+  })
+})
+
+describe('fenced code fidelity', () => {
+  const PAGE_WITH_FENCE = (payload: string) => `<!doctype html><html><head><title>Code</title></head><body>
+<main><article>
+<p>The snippet below keeps its blank lines, which carry meaning in Python and in unified diffs.</p>
+<pre><code>${payload}</code></pre>
+</article></main></body></html>`
+
+  it('leaves blank runs inside a fence untouched', () => {
+    const { markdown } = htmlToMarkdown(PAGE_WITH_FENCE('def a():\n    pass\n\n\n\ndef b():\n    pass'), 'https://example.com/code')
+    // A blanket \n{3,} -> \n\n collapse rewrote the fenced payload, so two
+    // definitions separated by a blank run came out adjacent.
+    expect(markdown).toContain('def a():')
+    expect(markdown).toContain('def b():')
+    const fenceBody = markdown.slice(markdown.indexOf('```'), markdown.lastIndexOf('```'))
+    expect(fenceBody).toMatch(/pass\n\n\n\n/)
+  })
+
+  it('still collapses blank runs in the surrounding prose', () => {
+    const page = `<!doctype html><html><head><title>Prose</title></head><body>
+<main><article><p>First paragraph of prose that is long enough to be extracted as the article body.</p>
+${'\n\n\n\n'}
+<p>Second paragraph after a long run of blank lines in the source.</p>
+</article></main></body></html>`
+    const { markdown } = htmlToMarkdown(page, 'https://example.com/prose')
+    expect(markdown).not.toMatch(/\n{3,}/)
+  })
+
+  it('does not treat a shorter nested fence marker as the closing fence', () => {
+    // A ``` block containing ~~~ and a longer ```` block containing ``` both have
+    // to stay balanced; a naive toggle on any fence marker would close early and
+    // then mangle everything after it.
+    const { markdown } = htmlToMarkdown(PAGE_WITH_FENCE('````\n```\ninner\n```\n````'), 'https://example.com/nested')
+    expect(markdown).toContain('inner')
+  })
+})
+
+describe('data-URI elision', () => {
+  const MIME = 'data:image/png;base64,'
+  const PAYLOAD = 'iVBORw0KGgoAAAANSUhEUg'
+  const PAGE_WITH = (markup: string) => `<!doctype html><html><head><title>Images</title></head><body>
+<main><article>
+<p>A page whose illustrations are inlined, which is what a CMS does to avoid extra requests.</p>
+${markup}
+</article></main></body></html>`
+
+  it('elides a lowercase data-URI image and reports its size', () => {
+    const { markdown } = htmlToMarkdown(PAGE_WITH(`<p><img alt="chart" src="${MIME}${PAYLOAD}"></p>`), 'https://example.com/i')
+    expect(markdown).not.toContain(PAYLOAD)
+    expect(markdown).toMatch(/data:image\/png;base64,\.\.\./)
+  })
+
+  it('elides a scheme-cased data-URI image', () => {
+    // `Data:` is a legal spelling of the scheme; matching the raw value with
+    // startsWith('data:') let the whole payload through.
+    const { markdown } = htmlToMarkdown(PAGE_WITH(`<p><img alt="chart" src="Data:image/png;base64,${PAYLOAD}"></p>`), 'https://example.com/i')
+    expect(markdown).not.toContain(PAYLOAD)
+  })
+
+  it('elides a data-URI image whose attribute value has a leading newline', () => {
+    const { markdown } = htmlToMarkdown(PAGE_WITH(`<p><img alt="chart" src="\n data:image/png;base64,${PAYLOAD}"></p>`), 'https://example.com/i')
+    expect(markdown).not.toContain(PAYLOAD)
+    expect(markdown).toContain('![chart](data:image/png;base64,...15B)')
+  })
+
+  it('elides a data-URI download link', () => {
+    // A data: href is inlined verbatim by the converter, so a single PDF link
+    // could spend the whole output budget on base64.
+    const { markdown } = htmlToMarkdown(PAGE_WITH(`<p><a href="data:application/pdf;base64,${PAYLOAD}">Download</a></p>`), 'https://example.com/i')
+    expect(markdown).not.toContain(PAYLOAD)
+    expect(markdown).toContain('Download')
+  })
+
+  it('elides a data-URI source inside a picture element', () => {
+    const { markdown } = htmlToMarkdown(PAGE_WITH(`<picture><source srcset="data:image/webp;base64,${PAYLOAD}"><img alt="chart" src="/c.png"></picture>`), 'https://example.com/i')
+    expect(markdown).not.toContain(PAYLOAD)
+  })
+
+  it('still resolves ordinary relative sources', () => {
+    const { markdown } = htmlToMarkdown(PAGE_WITH('<p><img alt="chart" src="/img/chart.png"></p>'), 'https://example.com/dir/page')
+    expect(markdown).toContain('https://example.com/img/chart.png')
+  })
+})
+
+describe('pipeline depth guard', () => {
+  /** A document whose only content sits under `depth` nested wrappers. */
+  function nested(depth: number, leaf = 'deep leaf text survives clamping'): string {
+    let body = `<p>${leaf}</p>`
+    for (let i = 0; i < depth; i++) body = `<div>${body}</div>`
+    return `<!doctype html><html><head><title>Nested</title></head><body>${body}</body></html>`
+  }
+
+  it('returns a pathologically deep document quickly and keeps its text', () => {
+    const html = nested(1024)
+    const started = Date.now()
+    const { markdown, pipelineDegraded } = htmlToMarkdown(html, 'https://example.com/deep')
+    const elapsed = Date.now() - started
+    // Without the clamp, Readability's synchronous scoring took ~12s here (the
+    // 1024-deep case measured at 12.4s for a 21.6KB page) with the event loop
+    // blocked throughout. The budget is deliberately generous relative to the
+    // ~250ms measured, so the assertion catches a regression to seconds rather
+    // than a slow machine.
+    expect(elapsed).toBeLessThan(3000)
+    expect(markdown).toContain('deep leaf text survives clamping')
+    expect(pipelineDegraded).toBe(true)
+  })
+
+  it('reports no degradation for a normally nested page', () => {
+    const { pipelineDegraded, markdown } = htmlToMarkdown(nested(20), 'https://example.com/shallow')
+    expect(pipelineDegraded).toBeUndefined()
+    expect(markdown).toContain('deep leaf text survives clamping')
+  })
+
+  it('leaves an ordinary article byte-identical to the unguarded pipeline', () => {
+    // The guard must be invisible on real input: same output whether or not the
+    // tree is anywhere near the ceiling.
+    const shallow = htmlToMarkdown(ARTICLE_PAGE, 'https://example.com/a')
+    expect(shallow.pipelineDegraded).toBeUndefined()
+    expect(shallow.markdown).toContain('Getting started')
+    expect(shallow.markdown).toContain('Installation')
+  })
+
+  it('degrades rather than scores when the element count blows the budget', () => {
+    // Breadth scales Readability's cost independently of depth. Past the element
+    // budget the pipeline skips scoring instead of paying seconds for it.
+    const rows = Array.from({ length: 5_000 }, (_, i) => `<div><span>r${i}</span><p>item ${i}</p></div>`).join('')
+    const html = `<!doctype html><html><head><title>Wide</title></head><body>${rows}</body></html>`
+    const started = Date.now()
+    const { markdown, pipelineDegraded } = htmlToMarkdown(html, 'https://example.com/wide')
+    const elapsed = Date.now() - started
+    expect(elapsed).toBeLessThan(3000)
+    expect(pipelineDegraded).toBe(true)
+    // Content still comes back: only the extraction was skipped.
+    expect(markdown).toContain('item 4999')
+  })
+})
