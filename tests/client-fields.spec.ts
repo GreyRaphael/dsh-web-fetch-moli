@@ -10,9 +10,11 @@
  * Node-safe: `src/client/fields.ts` imports the spec types type-only.
  */
 import { describe, expect, it } from 'vitest'
+import { Config } from '../src/config.ts'
 import {
   settingsBooleanField, settingsBoundedNumberField, settingsChoiceField,
 } from '../src/client/fields.ts'
+import { en, zh } from '../src/client/locales.ts'
 
 describe('settingsChoiceField', () => {
   it('formats an accepted value as itself and anything else as empty', () => {
@@ -91,5 +93,22 @@ describe('settingsBoundedNumberField', () => {
     expect(settingsBoundedNumberField('maxConcurrency', 1, 200).parse('201')).toBeUndefined()
     expect(settingsBoundedNumberField('challengeWaitMs', 0, 60_000).parse('60001')).toBeUndefined()
     expect(settingsBoundedNumberField('challengeRetries', 0, 3).parse('4')).toBeUndefined()
+  })
+})
+
+describe('client locales parity with Host Config', () => {
+  it('provides English and Chinese copy for every field declared on Config', () => {
+    const dict = (Config as unknown as { dict: Record<string, unknown> }).dict
+    for (const field of Object.keys(dict)) {
+      if (field === 'backend') {
+        expect(en.backendLabel).toBeTruthy()
+        expect(zh.backendLabel).toBeTruthy()
+        continue
+      }
+      expect(en[field as keyof typeof en], `en.${field}`).toBeTruthy()
+      expect(en[`${field}Hint` as keyof typeof en], `en.${field}Hint`).toBeTruthy()
+      expect(zh[field as keyof typeof zh], `zh.${field}`).toBeTruthy()
+      expect(zh[`${field}Hint` as keyof typeof zh], `zh.${field}Hint`).toBeTruthy()
+    }
   })
 })

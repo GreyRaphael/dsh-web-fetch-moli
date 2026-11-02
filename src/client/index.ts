@@ -5,7 +5,7 @@
  * @module dsh-web-fetch-moli/client
  */
 
-import type { Context } from 'cordis'
+import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 // Type-only: the ctx.configForms Context merge and the ConfigForm contract.
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'

@@ -16,24 +16,24 @@ import type { UserConfig } from 'tsdown'
 import { transform } from 'lightningcss'
 
 /**
- * Modules the browser shell seeds into its frozen module table and this bundle
- * therefore resolves through the loader's `require` instead of inlining.
+ * Baseline modules the browser shell (`@deepseek-ai/dsh-client-web` in
+ * `dsh-v0.2.1-rc.3+`) seeds unconditionally into its frozen module table.
  *
- * `dsh-client-store` carries the snapshot-store implementation the settings
- * form is built on, and `dsh-client-ui-primitives` is the settings-form kit
- * (form frame, value fields, checkboxes). Both are platform words, not
- * cross-plugin dependencies: the shell imports the same instances, so sharing
- * them keeps one copy of the widgets and their state engine. Declared to the
- * Host through `dsh.client.external` in package.json — the two lists must name
- * the same specifiers, or the bundle requires something the module table
- * cannot answer.
+ * Because they belong to the implicit `PLATFORM_MODULES` baseline, the bundle
+ * resolves them through the loader's `require` without needing a
+ * `dsh.client.external` declaration in `package.json`.
  */
-const PLATFORM_EXTERNALS = [
+const CLIENT_EXTERNALS = [
+  'react',
+  'react/jsx-runtime',
+  'react-dom',
+  'react-dom/client',
+  '@deepseek-ai/cordis',
   '@deepseek-ai/dsh-client-store',
+  '@deepseek-ai/dsh-client-ui-slots',
   '@deepseek-ai/dsh-client-ui-primitives',
-] as const
-
-const CLIENT_EXTERNALS = ['react', 'react/jsx-runtime', 'react-dom', 'react-dom/client', 'cordis', ...PLATFORM_EXTERNALS]
+  '@deepseek-ai/dsh-client-ui-dockkit',
+]
 const NODE_BUILTINS = new Set([...builtinModules, ...builtinModules.map(id => `node:${id}`)])
 const CSS_PREFIX = '\0dsh-web-fetch-moli-css:'
 const CSS_SUFFIX = '.mjs'

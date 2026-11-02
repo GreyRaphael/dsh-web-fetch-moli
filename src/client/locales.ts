@@ -11,6 +11,7 @@ export type MoliCardLocaleKey =
   | 'moliPath' | 'moliPathHint' | 'moliPathPlaceholder'
   | 'cdpEndpoint' | 'cdpEndpointHint' | 'cdpEndpointPlaceholder'
   | 'bypassCsp' | 'bypassCspHint'
+  | 'ignoreCertificateErrors' | 'ignoreCertificateErrorsHint'
   | 'autoScrollSentinel' | 'autoScrollSentinelHint'
   | 'shareBrowserContext' | 'shareBrowserContextHint'
   | 'denoise' | 'denoiseHint'
@@ -30,20 +31,22 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 /** English copy. */
 export const en: Record<MoliCardLocaleKey, string> = {
-  description: 'Ultra-lightweight web-fetch provider using Moli (Rust headless browser, ~60MB RAM). Supports local managed daemon and remote CDP.',
+  description: 'Ultra-lightweight web-fetch provider using Moli (Rust headless browser). Supports local managed daemon and remote CDP.',
   backendLabel: 'Backend mode',
   backendLocal: 'Local Moli daemon',
-  backendLocalHint: 'Spawns a managed local moli serve process over CDP with micro-frontend and CSP bypass support (~60MB RAM).',
+  backendLocalHint: 'Spawns a managed local moli serve process over CDP with micro-frontend and CSP bypass support.',
   backendCdp: 'Remote CDP endpoint',
   backendCdpHint: 'Connect to an existing Moli or Chromium CDP service over DevTools Protocol.',
   moliPath: 'Moli executable path',
-  moliPathHint: 'Leave blank to auto-discover moli on $PATH or standard directories.',
+  moliPathHint: 'Leave blank to auto-discover moli via MOLI_PATH, ~/.cache/moli, or $PATH.',
   moliPathPlaceholder: '(auto: moli from $PATH)',
   cdpEndpoint: 'CDP endpoint',
   cdpEndpointHint: 'host:port or http(s)/ws URL. Leave blank for 127.0.0.1:9222.',
   cdpEndpointPlaceholder: '',
   bypassCsp: 'Bypass CSP (micro-frontend support)',
   bypassCspHint: 'Enables CDP Page.setBypassCSP to allow dynamic script loading in micro-frontend sandboxes (e.g. Alibaba Alfa / qiankun).',
+  ignoreCertificateErrors: 'Ignore TLS certificate errors',
+  ignoreCertificateErrorsHint: 'Enables CDP Security.setIgnoreCertificateErrors (off by default). Enable only for intranet hosts with self-signed or MITM-proxied certificates.',
   autoScrollSentinel: 'Auto-trigger lazy-load sentinels',
   autoScrollSentinelHint: 'Enables native CDP micro-clip layout materialization and scrollIntoView to dynamically load infinite card lists.',
   shareBrowserContext: 'Share browser context (profile logins)',
@@ -75,20 +78,22 @@ export const en: Record<MoliCardLocaleKey, string> = {
 
 /** Simplified Chinese copy. */
 export const zh: Record<MoliCardLocaleKey, string> = {
-  description: '基于 Moli（超轻量 Rust 无头浏览器，仅约 60MB 内存）的网页抓取插件。支持受管本地服务及远程 CDP 集群。',
+  description: '基于 Moli（超轻量 Rust 无头浏览器）的网页抓取插件。支持受管本地服务及远程 CDP 集群。',
   backendLabel: '后端运行模式',
   backendLocal: '本地 Moli 服务',
-  backendLocalHint: '在本地启动受管的 moli serve 服务并通过 CDP 通信，支持微前端沙箱与 CSP 绕过，内存占用仅约 60MB。',
+  backendLocalHint: '在本地启动受管的 moli serve 服务并通过 CDP 通信，支持微前端沙箱与 CSP 绕过。',
   backendCdp: '远端 CDP 地址',
   backendCdpHint: '连接至已在运行的 Moli 或 Chromium CDP 端口。',
   moliPath: 'Moli 可执行文件路径',
-  moliPathHint: '留空则按系统 $PATH 或默认目录查找 moli。',
+  moliPathHint: '留空则依次探测 MOLI_PATH、~/.cache/moli 或系统 $PATH 中的 moli。',
   moliPathPlaceholder: '（自动：按 $PATH 查找 moli）',
   cdpEndpoint: 'CDP 地址',
   cdpEndpointHint: 'host:port 或 http(s)/ws 地址；留空默认 127.0.0.1:9222。',
   cdpEndpointPlaceholder: '',
   bypassCsp: '绕过 CSP（支持微前端）',
   bypassCspHint: '开启 CDP Page.setBypassCSP，允许微前端沙箱（如阿里 Alfa / qiankun）动态加载模块。',
+  ignoreCertificateErrors: '忽略 TLS 证书错误',
+  ignoreCertificateErrorsHint: '开启 CDP Security.setIgnoreCertificateErrors（默认关闭）。仅在访问使用自签名或 MITM 代理证书的内网主机时开启。',
   autoScrollSentinel: '自动触发瀑布流懒加载',
   autoScrollSentinelHint: '开启原生 CDP Micro-Clip 排版物化与 scrollIntoView 动态滚动，自动加载全部无限瀑布流卡片。',
   shareBrowserContext: '共享浏览器上下文（复用登录态）',

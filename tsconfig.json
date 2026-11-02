@@ -14,10 +14,7 @@
     "verbatimModuleSyntax": true,
     "allowImportingTsExtensions": true,
     "noEmit": true,
-    "types": ["node", "react"],
-    "paths": {
-      "cordis": ["./node_modules/@deepseek-ai/cordis"]
-    }
+    "types": ["node", "react"]
   },
   "include": ["src", "tests", "tsdown.config.ts"]
 }

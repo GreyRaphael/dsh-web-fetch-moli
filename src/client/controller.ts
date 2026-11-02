@@ -11,7 +11,7 @@
  * @module dsh-web-fetch-moli/client/controller
  */
 
-import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
+import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import {
   SettingsFormModel, settingsTextField,
   type SettingsFieldState, type SettingsFormActions,
@@ -31,6 +31,7 @@ export interface MoliSettings {
   cdpEndpoint?: string
   shareBrowserContext?: boolean
   bypassCsp?: boolean
+  ignoreCertificateErrors?: boolean
   autoScrollSentinel?: boolean
   denoise?: boolean
   timeoutMs?: number
@@ -46,6 +47,7 @@ export interface MoliCardState extends SettingsFormShell {
   cdpEndpoint: SettingsFieldState
   shareBrowserContext: SettingsFieldState
   bypassCsp: SettingsFieldState
+  ignoreCertificateErrors: SettingsFieldState
   autoScrollSentinel: SettingsFieldState
   denoise: SettingsFieldState
   timeoutMs: SettingsFieldState
@@ -76,6 +78,7 @@ export class MoliCardController {
       settingsTextField('cdpEndpoint'),
       settingsBooleanField('shareBrowserContext'),
       settingsBooleanField('bypassCsp'),
+      settingsBooleanField('ignoreCertificateErrors'),
       settingsBooleanField('autoScrollSentinel'),
       settingsBooleanField('denoise'),
       // Bounds mirror the Host schema ceilings in src/config.ts
@@ -97,6 +100,7 @@ export class MoliCardController {
       cdpEndpoint: this.form.field('cdpEndpoint'),
       shareBrowserContext: this.form.field('shareBrowserContext'),
       bypassCsp: this.form.field('bypassCsp'),
+      ignoreCertificateErrors: this.form.field('ignoreCertificateErrors'),
       autoScrollSentinel: this.form.field('autoScrollSentinel'),
       denoise: this.form.field('denoise'),
       timeoutMs: this.form.field('timeoutMs'),

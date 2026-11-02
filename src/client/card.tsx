@@ -22,7 +22,7 @@ import css from './card.module.css'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
-    'plugins.bundle.config': { kind: 'keyed'; scope: 'root'; owner: { view?: 'summary' | 'page' } }
+    'plugins.bundle.config': { kind: 'keyed'; scope: 'root'; owner: { readonly view: 'summary' | 'page' } }
   }
 }
 
@@ -79,16 +79,17 @@ export function MoliCard(props: MoliCardProps) {
    * two: dropping them would hide the only way back to the deployment default.
    */
   const toggle = (
-    field: 'denoise' | 'bypassCsp' | 'autoScrollSentinel' | 'shareBrowserContext',
-    options?: { id?: string; disabled?: boolean },
+    field: 'denoise' | 'bypassCsp' | 'ignoreCertificateErrors' | 'autoScrollSentinel' | 'shareBrowserContext',
+    options?: { id?: string; disabled?: boolean; defaultChecked?: boolean },
   ) => {
     const off = options?.disabled ?? disabled
     const current = state[field]
+    const checked = current.text === '' ? (options?.defaultChecked ?? true) : current.text === 'true'
     return (
       <div key={field} className={css.toggle}>
         <div className={css.toggleRow}>
           <Checkbox
-            checked={current.text !== 'false'}
+            checked={checked}
             label={t(field)}
             disabled={off}
             onChange={(next) => { props.edit(field, next ? 'true' : 'false') }}
@@ -161,6 +162,7 @@ export function MoliCard(props: MoliCardProps) {
       {valueField('cdpEndpoint', { disabled: disabled || backend !== 'cdp', placeholder: '127.0.0.1:9222' })}
       {toggle('shareBrowserContext', { disabled: disabled || backend !== 'cdp' })}
       {toggle('bypassCsp')}
+      {toggle('ignoreCertificateErrors', { defaultChecked: false })}
       {toggle('autoScrollSentinel')}
       {toggle('denoise')}
       {valueField('timeoutMs')}
