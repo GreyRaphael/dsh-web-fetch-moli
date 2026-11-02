@@ -2,14 +2,17 @@
 #
 # 1. Pin the web seam's fetch provider to this plugin's provider (id
 #    'moli'). A patch replaces the targeted row's WHOLE config, so every
-#    key written here is deliberate. `searchProvider` is intentionally omitted:
-#    this bundle owns fetch, not search. Omitted means auto-select when exactly
-#    one search provider is usable (the base bundle registers only
-#    'deepseek-official', so the default composition is unchanged), while any
-#    later layer — the user's own search bundle, the profile/home
-#    cordis.patch.yml, or $DSH_WEB_SEARCH_PROVIDER — stays free to pin search
-#    without this layer out-ranking it. Two usable search providers with no
-#    explicit selection fail loud (WEB_PROVIDER_AMBIGUOUS) instead of guessing.
+#    key the base layer set must be restated here or it is silently dropped.
+#    `searchProvider` is therefore written back to the base layer's own value
+#    ('deepseek-official') deliberately. Omitting it does NOT mean "inherit":
+#    the base pin would disappear, and because the base composition registers
+#    TWO usable search providers ('deepseek-official' from
+#    web-search-deepseek and 'deepseek-search-api' from web-deepseek-api),
+#    the seam's no-explicit-selection path would find more than one usable
+#    provider and fail every web_search with WEB_PROVIDER_AMBIGUOUS.
+#    Restating it still leaves later layers free to repin search: the user's
+#    own search bundle, the profile/home cordis.patch.yml, and
+#    $DSH_WEB_SEARCH_PROVIDER all apply after this layer.
 # 2. Enable the model-facing web_fetch tool with a browser-realistic budget
 #    (launch + render + denoise takes longer than a plain HTTP GET; 60s
 #    matches the deployment's search budget). `disabled: false` re-enables
@@ -22,6 +25,7 @@
 # ('web-fetch-moli') layering over the row config is hot-reloaded.
 - id: web
   config:
+    searchProvider: deepseek-official
     fetchProvider: moli
 
 - id: tool-web

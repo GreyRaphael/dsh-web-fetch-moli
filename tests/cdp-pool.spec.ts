@@ -175,33 +175,70 @@ describe('CdpConnectionPool', () => {
     expect(next.closed).toBe(false)
   })
 
-  it('abandons a connect that settles after dispose, leaving no stale reference', async () => {
+  /**
+   * The one window the entry check cannot cover: a dial already in flight when
+   * dispose() runs. Unload must stay final, so the settling connect is closed
+   * instead of adopted — otherwise the plugin leaves an open connection (and,
+   * in profile mode, a tab in the user's browser) that nothing owns.
+   */
+  it('closes a connection that settles after dispose instead of adopting it', async () => {
     const connection = new FakeConnection()
+    const replacement = new FakeConnection()
     let releaseConnect: (() => void) | undefined
     let connectCount = 0
     const endpoint = 'http://127.0.0.1:9222'
     const pool = new CdpConnectionPool(async () => {
       connectCount++
-      // The second connect hangs until the test releases it.
+      // The reconnect (dial #2) hangs until the test releases it.
       if (connectCount === 2) await new Promise<void>(resolve => { releaseConnect = resolve })
-      return connection.browser
+      return connectCount === 1 ? connection.browser : replacement.browser
     })
 
     await pool.acquire(endpoint, 1000) // connect #1 establishes
-    await pool.dispose()
-    const pending = pool.acquire(endpoint, 1000).then(  // connect #2, hanging
+    connection.drop() // force the next acquire down the dial path
+    const pending = pool.acquire(endpoint, 1000).then(
       lease => lease.browser,
-      () => undefined as unknown as CdpBrowser,
+      (error: unknown) => error as Error,
     )
-    await new Promise(resolve => { setImmediate(resolve) })
-    await pool.dispose() // abandons the in-flight #2
+    await new Promise(resolve => { setImmediate(resolve) }) // dial #2 is in flight
+    await pool.dispose() // teardown lands mid-dial
     releaseConnect?.()
-    expect(await pending).toBeUndefined() // the abandoned attach rejects
+    const settled = await pending
+    expect(settled).toBeInstanceOf(Error)
+    expect((settled as Error).message).toContain('disposed')
+    expect(replacement.closed).toBe(true) // the late connection was closed, not adopted
+    expect(connectCount).toBe(2)
+  })
 
-    // The next acquire must connect fresh — the late settler left no residue.
-    const lease = await pool.acquire(endpoint, 1000)
-    expect(lease.browser).toBe(connection.browser)
-    expect(connectCount).toBe(3)
+  /**
+   * Disposal is terminal, matching `MoliProcessManager`. Before the guard, a
+   * fetch racing unload reconnected here (measured connects 1→2) and left a
+   * live connection behind with no owner.
+   */
+  it('refuses to acquire after dispose and opens no second connection', async () => {
+    const connection = new FakeConnection()
+    const { connect, calls } = scriptedConnect(connection)
+    const pool = new CdpConnectionPool(connect)
+
+    await pool.acquire('http://127.0.0.1:9222', 1000)
+    await pool.dispose()
+    expect(calls).toHaveLength(1)
+
+    await expect(pool.acquire('http://127.0.0.1:9222', 1000)).rejects.toThrow(/disposed/i)
+    expect(calls).toHaveLength(1) // no reconnect
+    expect(connection.isolatedContexts).toHaveLength(1) // no tab opened either
+  })
+
+  it('dispose twice is a no-op rather than a second close', async () => {
+    const connection = new FakeConnection()
+    const { connect } = scriptedConnect(connection)
+    const pool = new CdpConnectionPool(connect)
+
+    await pool.acquire('http://127.0.0.1:9222', 1000)
+    await pool.dispose()
+    connection.closed = false
+    await pool.dispose()
+    expect(connection.closed).toBe(false) // nothing left to close
   })
 
   it('abandons a connect made stale by an endpoint change before it settles', async () => {

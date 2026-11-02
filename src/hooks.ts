@@ -29,8 +29,11 @@ async function sendCdp(page: CdpPage, method: string, params: Record<string, unk
  * Applies the 3 essential non-default CDP configurations:
  * 1. Page.setBypassCSP: { enabled } — micro-frontend sandboxes injecting ES
  *    modules (gated by the bypassCsp setting, default true).
- * 2. Security.setIgnoreCertificateErrors: { ignore: true } — intranet /
- *    self-signed / MITM-proxy certificates must not abort the fetch.
+ * 2. Security.setIgnoreCertificateErrors: { ignore } — intranet / self-signed /
+ *    MITM-proxy certificates must not abort the fetch. Gated by
+ *    `ignoreCertificateErrors`, default FALSE: disabling TLS verification
+ *    accepts whatever the peer presents, so it stays off unless the deployment
+ *    asks for it.
  * 3. Network.setBypassServiceWorker: { bypass: true } — always read live
  *    content, never a stale Service Worker cache.
  *
@@ -39,16 +42,22 @@ async function sendCdp(page: CdpPage, method: string, params: Record<string, unk
  * navigator.webdriver=false are native defaults in Moli's profile.)
  *
  * @param page - CDP page.
- * @param options - hook options (bypassCsp).
+ * @param options - hook options (`bypassCsp`, `ignoreCertificateErrors`); both
+ * optional, and an omitted `ignoreCertificateErrors` means "verify
+ * certificates", which is the safe default for an option that weakens transport
+ * security.
  */
 export async function setupPageHooks(
   page: CdpPage,
-  options: { bypassCsp?: boolean } = {},
+  options: { bypassCsp?: boolean; ignoreCertificateErrors?: boolean } = {},
 ): Promise<void> {
   const bypassCsp = options.bypassCsp !== false
+  // Explicit `=== true` rather than `!== false`: an absent value must mean
+  // strict verification, so a caller that forgets the field fails closed.
+  const ignoreCertificateErrors = options.ignoreCertificateErrors === true
   await Promise.all([
     sendCdp(page, 'Page.setBypassCSP', { enabled: bypassCsp }),
-    sendCdp(page, 'Security.setIgnoreCertificateErrors', { ignore: true }),
+    sendCdp(page, 'Security.setIgnoreCertificateErrors', { ignore: ignoreCertificateErrors }),
     sendCdp(page, 'Network.setBypassServiceWorker', { bypass: true }),
   ])
 }

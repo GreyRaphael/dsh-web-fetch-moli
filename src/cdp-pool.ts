@@ -38,6 +38,15 @@ export class CdpConnectionPool {
   private connectingEndpoint = ''
   /** Bumped by dispose/replace so a settling connect knows it was abandoned. */
   private generation = 0
+  /**
+   * Terminal flag: `dispose()` means the plugin is unloading, so a later
+   * `acquire()` must fail rather than reconnect. Without it, a fetch racing
+   * teardown reopens a connection (and, in profile mode, a tab in the user's
+   * real browser) that nobody is left to close — an orphan the unload path
+   * cannot see. `MoliProcessManager` guards the same race for the daemon; the
+   * two halves of teardown need the same guarantee.
+   */
+  private disposed = false
 
   /**
    * @param connect - opens a connection to an endpoint.
@@ -54,6 +63,7 @@ export class CdpConnectionPool {
    * @returns lease containing browser, context, and page.
    */
   async acquire(endpoint: string, timeoutMs: number, mode: CdpAcquireMode = 'isolated'): Promise<CdpLease> {
+    this.throwIfDisposed()
     const browser = await this.ensure(endpoint, timeoutMs)
     try {
       return await this.openLease(browser, mode)
@@ -65,6 +75,15 @@ export class CdpConnectionPool {
       const fresh = await this.ensure(endpoint, timeoutMs)
       return await this.openLease(fresh, mode)
     }
+  }
+
+  /**
+   * Reject work that arrives after teardown started. Mirrors
+   * `MoliProcessManager.ensure`, so both halves of the plugin fail the same way
+   * instead of one resurrecting silently.
+   */
+  private throwIfDisposed(): void {
+    if (this.disposed) throw new Error('cdp connection pool is disposed; cannot open a new lease')
   }
 
   /**
@@ -98,9 +117,12 @@ export class CdpConnectionPool {
   }
 
   /**
-   * Drop the shared connection.
+   * Drop the shared connection and make disposal terminal: later acquires fail
+   * instead of reconnecting. Idempotent, so a second call (unload racing an
+   * explicit dispose) is a no-op rather than a second close.
    */
   async dispose(): Promise<void> {
+    this.disposed = true
     const browser = this.browser
     this.browser = undefined
     this.endpoint = ''
@@ -112,6 +134,7 @@ export class CdpConnectionPool {
 
   /** The shared connection for `endpoint`, connecting or reconnecting as needed. */
   private async ensure(endpoint: string, timeoutMs: number): Promise<CdpBrowser> {
+    this.throwIfDisposed()
     if (this.browser !== undefined && this.endpoint === endpoint && this.isLive(this.browser)) return this.browser
     if (this.connecting !== undefined && this.connectingEndpoint === endpoint) return this.connecting
     return await this.connectFresh(endpoint, timeoutMs)
@@ -119,12 +142,19 @@ export class CdpConnectionPool {
 
   /** Start a connection to `endpoint`, superseding whatever was there. */
   private connectFresh(endpoint: string, timeoutMs: number): Promise<CdpBrowser> {
+    this.throwIfDisposed()
     const stale = this.browser
     this.browser = undefined
     this.endpoint = ''
     const generation = ++this.generation
     const attempt = (async () => {
       const browser = await this.connect(endpoint, timeoutMs)
+      // Disposal during the dial is the one window the entry check cannot cover:
+      // adopt nothing and close what we just opened, so unload stays final.
+      if (this.disposed) {
+        await browser.close().catch(() => {})
+        throw new Error('cdp connection pool was disposed while connecting')
+      }
       if (generation !== this.generation) {
         await browser.close().catch(() => {})
         throw new Error('cdp connection abandoned before it attached')

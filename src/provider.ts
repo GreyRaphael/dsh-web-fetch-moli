@@ -45,7 +45,23 @@ const MAX_URL_LENGTH = 2048
 /** Cap on the decoded markdown/HTML body this provider returns. */
 const MAX_BODY_CHARS = 100_000
 
-/** Cap on rendered HTML fed into the synchronous denoise pipeline. */
+/**
+ * Cap on rendered HTML fed into the synchronous denoise pipeline.
+ *
+ * This bounds bytes, not time: it exists so a page whose serialized DOM is
+ * enormous cannot cost unbounded memory and parse work before the pipeline
+ * even starts. It is deliberately NOT the synchronous-blocking defence —
+ * measured blocking is driven by DOM shape rather than size (a 21.6KB page
+ * nested 1024 deep took ~46s), which a character cap cannot see. That axis is
+ * bounded inside `htmlToMarkdown` by `MAX_PIPELINE_DOM_DEPTH` /
+ * `MAX_PIPELINE_DOM_NODES` (see the measurement table on
+ * `MAX_PIPELINE_DOM_DEPTH` in `config.ts`), whose result arrives here as
+ * `pipelineDegraded`.
+ *
+ * Lowering this number instead would truncate legitimate documents: a real
+ * Wikipedia article serializes to ~1.05MB and denoises in ~1.1s, which is
+ * well inside the fetch budget.
+ */
 const MAX_PIPELINE_INPUT_CHARS = 2_000_000
 
 /** How long a fetch may sit in the concurrency queue before failing fast. */
@@ -257,6 +273,28 @@ function validateFetchUrl(input: string): URL {
 
 type DecodableKind = 'html' | 'text'
 
+/**
+ * Classify a response's `Content-Type` into a decodable body kind.
+ *
+ * Thresholds and cases mirror `@deepseek-ai/dsh-web-fetch-http`'s
+ * `classifyContentType`, because the two providers answer the same question and
+ * a user switching backends must not see a resource become undecodable. The
+ * structured-text arm is the one that drifts most easily: RSS/Atom
+ * (`application/xml`, `application/atom+xml`) and JSON-LD
+ * (`application/ld+json`) are ordinary `web_fetch` targets, and rejecting them
+ * reports `WEB_UNSUPPORTED_CONTENT_TYPE` for a resource the platform decodes
+ * fine.
+ *
+ * One deliberate divergence: a MISSING header is `html` here, where the
+ * platform's raw-HTTP provider returns "unsupported". The platform reads bytes
+ * off the wire, so an absent type is genuine evidence it cannot safely decode
+ * them. This provider reads `page.content()` — the browser already parsed the
+ * response into a DOM, which is serialized HTML no matter what the wire said.
+ * Treating "no content-type" as undecodable would fail pages that actually
+ * rendered, so the rendered-DOM contract wins here.
+ * @param header - the raw `Content-Type` header, or `undefined` when absent.
+ * @returns the decodable kind, or `undefined` for a type this provider refuses.
+ */
 function classifyContentType(header: string | undefined): DecodableKind | undefined {
   if (header === undefined) return 'html'
   const bare = header.split(';')[0]?.trim().toLowerCase() ?? ''
@@ -264,6 +302,7 @@ function classifyContentType(header: string | undefined): DecodableKind | undefi
   if (bare === 'text/plain' || bare === 'text/markdown' || bare === 'application/json' || bare.startsWith('text/')) {
     return 'text'
   }
+  if (bare === 'application/xml' || bare.endsWith('+json') || bare.endsWith('+xml')) return 'text'
   return undefined
 }
 
@@ -390,6 +429,7 @@ export class MoliFetchProvider implements WebFetchProvider {
       try {
         await setupPageHooks(lease.page, {
           bypassCsp: config.bypassCsp,
+          ignoreCertificateErrors: config.ignoreCertificateErrors,
         })
         if (deadline.signal.aborted) {
           await release()
@@ -520,10 +560,14 @@ export class MoliFetchProvider implements WebFetchProvider {
       return capResult(finalUrl, statusCode, { kind: 'html', content: html })
     }
     const bounded = html.length > MAX_PIPELINE_INPUT_CHARS ? html.slice(0, MAX_PIPELINE_INPUT_CHARS) : html
-    const { markdown } = htmlToMarkdown(bounded, finalUrl)
+    const { markdown, pipelineDegraded } = htmlToMarkdown(bounded, finalUrl)
 
     const result = capResult(finalUrl, statusCode, { kind: 'text', content: markdown })
-    return bounded !== html ? { ...result, truncated: true } : result
+    // Two independent reasons the body is not the whole story, sharing one
+    // signal so a caller never has to know which axis bound the result: the
+    // input was clipped at MAX_PIPELINE_INPUT_CHARS, or the pipeline gave up
+    // full extraction (deep/broad DOM) and returned lower-fidelity markdown.
+    return bounded !== html || pipelineDegraded === true ? { ...result, truncated: true } : result
   }
 
   /**
@@ -919,10 +963,26 @@ function capResult(url: string, statusCode: number, body: { kind: 'html' | 'text
   }
 }
 
+/**
+ * Close a fetch's session, bounded by {@link CLOSE_GRACE_MS}.
+ *
+ * The budget is the point. `release()` awaits `page.close()`, which issues a
+ * CDP `Target.closeTarget` and waits on a hardcoded 60s command timeout
+ * (`cdp-client.ts`). A wedged daemon or a half-dead remote endpoint therefore
+ * parks that await for up to a minute, and because teardown runs in the
+ * `finally` of `fetch`, the caller's error would not surface until the close
+ * finished — a fetch that already hit its deadline would stay pending for
+ * another 60s. Every arm below is bounded for that reason, including the lease
+ * arm, which is the only one production ever takes (`openSession` always
+ * returns a lease).
+ * @param session - the session to tear down, if one was opened.
+ * @param pool - the pool owning the lease.
+ */
 async function closeSession(session: MoliBrowserSession | undefined, pool: CdpConnectionPool): Promise<void> {
   if (session === undefined) return
   if (session.lease !== undefined) {
-    await pool.release(session.lease)
+    const lease = session.lease
+    await closeWithGrace({ close: () => pool.release(lease) })
     return
   }
   await closeWithGrace(session.page)

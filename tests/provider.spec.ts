@@ -24,6 +24,8 @@ interface FakePageSpec {
   contentType?: string
   /** Extra response headers (e.g. a Cloudflare edge's `cf-ray`). */
   headers?: Record<string, string>
+  /** Serve no `content-type` header at all (the classifier's missing-header arm). */
+  omitContentType?: boolean
   html?: string
   textBody?: string
   gotoError?: Error
@@ -78,6 +80,8 @@ interface FakePageState {
   scripts: string[]
   /** How many full-document `content()` reads the page served. */
   contentCalls: number
+  /** Every page-hook CDP command sent before navigation, in order. */
+  hookCommands: Array<{ method: string; params: Record<string, unknown> }>
 }
 
 /** Test-only observability riding on a fake session. */
@@ -85,6 +89,8 @@ interface FakeSessionProbe {
   closed: { pageClosed: boolean; context: boolean; browser: boolean; gotos: number }
   evaluatedScripts: string[]
   contentCalls: () => number
+  /** Page-hook CDP commands the provider sent before navigating. */
+  hookCommands: Array<{ method: string; params: Record<string, unknown> }>
 }
 
 /** Read a fake provider's last session counters (scripts run, documents read). */
@@ -95,10 +101,18 @@ function probeSession(provider: { lastSession: MoliBrowserSession | undefined })
 /** A substring only the settle probe's script carries. */
 const SETTLE_SCRIPT_MARKER = 'ant-spin'
 
+/**
+ * Upper bound for a fetch whose teardown is deliberately wedged. The provider's
+ * own grace budget is 1.5s; the assertion allows scheduling slack while staying
+ * far below the 60s CDP command timeout the fix exists to bound.
+ */
+const CLOSE_GRACE_BUDGET_MS = 5_000
+
 function fakeResponse(spec: FakePageSpec, entry?: NonNullable<FakePageSpec['gotoScript']>[number]): CdpResponse | null {
   if (spec.gotoError !== undefined) return null
   const challenge = entry?.challenge === true || (entry === undefined && spec.challenge === true)
   const headers: Record<string, string> = { ...spec.headers, 'content-type': entry?.contentType ?? spec.contentType ?? 'text/html; charset=utf-8' }
+  if (spec.omitContentType === true) delete headers['content-type']
   if (challenge) headers['cf-mitigated'] = 'challenge'
   return {
     status: () => entry?.status ?? spec.status ?? (challenge ? 403 : 200),
@@ -114,7 +128,12 @@ function fakeResponse(spec: FakePageSpec, entry?: NonNullable<FakePageSpec['goto
 }
 
 /** Shared page behavior: the members the provider touches, close tracking. */
-function makeFakePage(spec: FakePageSpec, state: FakePageState, popupListeners: Array<(page: CdpPage) => void> = []): CdpPage {
+function makeFakePage(
+  spec: FakePageSpec,
+  state: FakePageState,
+  popupListeners: Array<(page: CdpPage) => void> = [],
+  hookSink?: Array<{ method: string; params: Record<string, unknown> }>,
+): CdpPage {
   const gotoRejecters: Array<(error: Error) => void> = []
   const responseListeners: Array<(response: CdpResponse) => void> = []
   const scripted = spec.gotoScript ?? []
@@ -186,6 +205,13 @@ function makeFakePage(spec: FakePageSpec, state: FakePageState, popupListeners: 
       if (event === 'popup') popupListeners.push(listener as (page: CdpPage) => void)
       else responseListeners.push(listener as (response: CdpResponse) => void)
     },
+    // Records the page hooks the provider sends. `setupPageHooks` swallows
+    // errors, so a fake without `send` would let a missing option pass silently.
+    send: async (method: string, params: Record<string, unknown> = {}) => {
+      state.hookCommands.push({ method, params })
+      hookSink?.push({ method, params })
+      return {}
+    },
     ...(spec.noEvaluate === true ? {} : {
       evaluate: async (script: string | ((...args: unknown[]) => unknown), _arg?: unknown): Promise<unknown> => {
         state.scripts.push(typeof script === 'string' ? script : '')
@@ -203,7 +229,7 @@ function makeFakePage(spec: FakePageSpec, state: FakePageState, popupListeners: 
 }
 
 function fakeSession(spec: FakePageSpec): MoliBrowserSession {
-  const pageState: FakePageState = { pageClosed: false, gotos: 0, scripts: [], contentCalls: 0 }
+  const pageState: FakePageState = { pageClosed: false, gotos: 0, scripts: [], contentCalls: 0, hookCommands: [] }
   const closed = { context: false, browser: false }
   const page = makeFakePage(spec, pageState)
   const context: CdpContext = {
@@ -226,6 +252,7 @@ function fakeSession(spec: FakePageSpec): MoliBrowserSession {
     },
     evaluatedScripts: pageState.scripts,
     contentCalls: () => pageState.contentCalls,
+    hookCommands: pageState.hookCommands,
   } as unknown as MoliBrowserSession & FakeSessionProbe
 }
 
@@ -241,6 +268,7 @@ class FakeProvider extends MoliFetchProvider {
       cdpEndpoint: '',
       shareBrowserContext: true,
       bypassCsp: true,
+      ignoreCertificateErrors: false,
       autoScrollSentinel: true,
       denoise: true,
       maxConcurrency: 4,
@@ -275,6 +303,7 @@ class GatedProvider extends MoliFetchProvider {
       cdpEndpoint: '',
       shareBrowserContext: true,
       bypassCsp: true,
+      ignoreCertificateErrors: false,
       autoScrollSentinel: true,
       denoise: true,
       maxConcurrency: 4,
@@ -308,7 +337,7 @@ class GatedProvider extends MoliFetchProvider {
  * tracked for assertions. The default context records (and tests assert it
  * never receives) a close.
  */
-function fakeCdpConnection(spec: FakePageSpec = {}) {
+function fakeCdpConnection(spec: FakePageSpec = {}, options: { hangClose?: boolean } = {}) {
   const state = {
     connects: 0,
     isolatedContextsOpened: 0,
@@ -321,18 +350,28 @@ function fakeCdpConnection(spec: FakePageSpec = {}) {
     pagesOpened: 0,
     pagesClosed: 0,
     browserClosed: false,
+    /** Page-hook CDP commands every leased page received, in order. */
+    hookCommands: [] as Array<{ method: string; params: Record<string, unknown> }>,
     /** Popup listeners the guard registered on the leased pages. */
     popupListeners: [] as Array<(page: CdpPage) => void>,
   }
   const makePage = (): CdpPage => {
     state.pagesOpened++
-    const pageState: FakePageState = { pageClosed: false, gotos: 0, scripts: [], contentCalls: 0 }
-    const page = makeFakePage(spec, pageState, state.popupListeners)
+    const pageState: FakePageState = { pageClosed: false, gotos: 0, scripts: [], contentCalls: 0, hookCommands: [] }
+    const page = makeFakePage(spec, pageState, state.popupListeners, state.hookCommands)
     const base = page.close.bind(page)
     return {
       ...page,
       close: async () => {
         if (pageState.pageClosed) return // a real page's second close is a no-op
+        // Simulates a wedged daemon / half-dead remote peer: the CDP command is
+        // sent but never answered, so the real client would wait out its 60s
+        // command timeout. Teardown must not inherit that wait.
+        if (options.hangClose === true) {
+          state.pagesClosed++
+          pageState.pageClosed = true
+          return await new Promise<void>(() => {})
+        }
         state.pagesClosed++
         await base()
       },
@@ -364,6 +403,27 @@ function fakeCdpConnection(spec: FakePageSpec = {}) {
   }
 }
 
+/**
+ * A CDP-backend config source for tests that need the real `openSession`
+ * (and therefore the real page-hook wiring) rather than `FakeProvider`'s
+ * overridden session.
+ */
+function cdpConfig(overrides: Partial<ResolvedConfig> = {}): () => ResolvedConfig {
+  return () => ({
+    backend: 'cdp',
+    moliPath: '',
+    cdpEndpoint: '',
+    shareBrowserContext: false,
+    bypassCsp: true,
+    ignoreCertificateErrors: false,
+    autoScrollSentinel: true,
+    denoise: true,
+    challengeWaitMs: 0,
+    challengeRetries: 0,
+    ...overrides,
+  })
+}
+
 async function codeOf(promise: Promise<unknown>): Promise<string> {
   try {
     await promise
@@ -385,6 +445,33 @@ describe('MoliFetchProvider', () => {
     await expect(codeOf(new FakeProvider().fetch({ url: 'ftp://example.com/x' }))).resolves.toBe('WEB_INVALID_URL')
     await expect(codeOf(new FakeProvider().fetch({ url: 'http://user:pass@example.com/' }))).resolves.toBe('WEB_BLOCKED_URL')
     await expect(codeOf(new FakeProvider().fetch({ url: 'not a url' }))).resolves.toBe('WEB_INVALID_URL')
+  })
+
+  /**
+   * TLS verification is the default and the config is what flips it. Both
+   * directions are asserted because `setupPageHooks` swallows CDP errors, so a
+   * dropped option would silently leave the browser at whatever default it has
+   * instead of surfacing as a failure.
+   */
+  it('sends the configured certificate policy to the page hooks', async () => {
+    const strict = fakeCdpConnection()
+    await new MoliFetchProvider(cdpConfig({ ignoreCertificateErrors: false }), strict.pool)
+      .fetch({ url: 'https://example.com/x' })
+    expect(strict.state.hookCommands
+      .find(command => command.method === 'Security.setIgnoreCertificateErrors')?.params).toEqual({ ignore: false })
+
+    const lax = fakeCdpConnection()
+    await new MoliFetchProvider(cdpConfig({ ignoreCertificateErrors: true }), lax.pool)
+      .fetch({ url: 'https://example.com/x' })
+    expect(lax.state.hookCommands
+      .find(command => command.method === 'Security.setIgnoreCertificateErrors')?.params).toEqual({ ignore: true })
+  })
+
+  it('still sends the unchanged CSP and service-worker hooks alongside it', async () => {
+    const { state, pool } = fakeCdpConnection()
+    await new MoliFetchProvider(cdpConfig({ bypassCsp: false }), pool).fetch({ url: 'https://example.com/x' })
+    expect(state.hookCommands.find(command => command.method === 'Page.setBypassCSP')?.params).toEqual({ enabled: false })
+    expect(state.hookCommands.find(command => command.method === 'Network.setBypassServiceWorker')?.params).toEqual({ bypass: true })
   })
 
   it('returns denoised markdown for html pages', async () => {
@@ -421,6 +508,46 @@ describe('MoliFetchProvider', () => {
     expect(code).toBe('WEB_UNSUPPORTED_CONTENT_TYPE')
   })
 
+  /**
+   * The structured-text arm has to match `@deepseek-ai/dsh-web-fetch-http`'s
+   * classifier: RSS/Atom and JSON-LD are ordinary `web_fetch` targets, and
+   * rejecting them reports `WEB_UNSUPPORTED_CONTENT_TYPE` for a resource the
+   * platform decodes fine on the http backend.
+   */
+  it.each([
+    ['application/xml', '<rss><channel><title>Feed</title></channel></rss>'],
+    ['application/atom+xml', '<feed><title>Atom</title></feed>'],
+    ['application/ld+json', '{"@context":"https://schema.org"}'],
+    ['application/rss+xml; charset=utf-8', '<rss><channel/></rss>'],
+    ['text/xml', '<?xml version="1.0"?><root/>'],
+  ])('decodes %s as text instead of refusing it', async (contentType, textBody) => {
+    const result = await new FakeProvider({}, { contentType, textBody }).fetch({ url: 'https://example.com/feed' })
+    expect(result.body).toEqual({ kind: 'text', content: textBody })
+  })
+
+  it('still refuses a genuinely binary application/* subtype', async () => {
+    // `+json`/`+xml` and `application/xml` are accepted; unrelated application
+    // types are not, so the widened arm must not become a blanket accept.
+    for (const contentType of ['application/pdf', 'application/octet-stream', 'application/zip']) {
+      const code = await codeOf(new FakeProvider({}, { contentType }).fetch({ url: 'https://example.com/blob' }))
+      expect(code).toBe('WEB_UNSUPPORTED_CONTENT_TYPE')
+    }
+  })
+
+  /**
+   * Deliberate divergence from the platform's RAW-HTTP provider, documented on
+   * `classifyContentType`: this provider reads `page.content()`, so the browser
+   * already produced a DOM the provider can serialize, and failing the fetch
+   * would discard a page that actually rendered.
+   */
+  it('treats a missing content-type as html because the DOM already rendered', async () => {
+    // `denoise: false` keeps the html arm observable: with denoise on, html is
+    // converted to markdown text and the two arms would be indistinguishable.
+    const result = await new FakeProvider({ denoise: false }, { omitContentType: true })
+      .fetch({ url: 'https://example.com/notype' })
+    expect(result.body.kind).toBe('html')
+  })
+
   it('keeps a non-2xx status as a result, not an error', async () => {
     const result = await new FakeProvider({}, { status: 404, html: '<html><body><h1>Not found</h1></body></html>' })
       .fetch({ url: 'https://example.com/missing' })
@@ -433,6 +560,29 @@ describe('MoliFetchProvider', () => {
     const result = await new FakeProvider({}, { html }).fetch({ url: 'https://example.com/big' })
     expect(result.truncated).toBe(true)
     expect((result.body as { content: string }).content.length).toBe(100_000)
+  })
+
+  /**
+   * `truncated` is the caller's only honesty signal, so it has to cover the
+   * pipeline's own degradation — a deep/broad DOM loses full extraction while
+   * the body still has content, which a byte count alone cannot express. The
+   * nesting here is far past MAX_PIPELINE_DOM_DEPTH, and the body stays small
+   * enough that this is provably the depth path, not the character cap.
+   */
+  it('flags truncated when the pipeline degrades on a deeply nested DOM', async () => {
+    const open = '<div>'.repeat(400)
+    const close = '</div>'.repeat(400)
+    const html = `<!doctype html><html><body>${open}<p>buried leaf</p>${close}</body></html>`
+    expect(html.length).toBeLessThan(20_000) // well under MAX_PIPELINE_INPUT_CHARS
+    const result = await new FakeProvider({}, { html }).fetch({ url: 'https://example.com/deep' })
+    expect(result.truncated).toBe(true)
+    expect(result.body.kind).toBe('text')
+    expect((result.body as { content: string }).content).toContain('buried leaf')
+  })
+
+  it('does not flag truncated for an ordinary page the pipeline handled in full', async () => {
+    const result = await new FakeProvider({}, { html: ARTICLE_HTML }).fetch({ url: 'https://example.com/docs' })
+    expect(result.truncated).toBe(false)
   })
 
   it('maps navigation failures to WEB_PROVIDER_ERROR with the original message', async () => {
@@ -482,7 +632,7 @@ describe('MoliFetchProvider', () => {
       constructor() {
         super(() => ({
           backend: 'local', moliPath: '', cdpEndpoint: '', shareBrowserContext: true,
-          bypassCsp: true, autoScrollSentinel: true, denoise: true,
+          bypassCsp: true, ignoreCertificateErrors: false, autoScrollSentinel: true, denoise: true,
           timeoutMs: 30, maxConcurrency: 1, challengeWaitMs: 0, challengeRetries: 0,
         }))
       }
@@ -541,7 +691,7 @@ describe('MoliFetchProvider concurrency queue', () => {
       constructor() {
         super(() => ({
           backend: 'local', moliPath: '', cdpEndpoint: '', shareBrowserContext: true,
-          bypassCsp: true, autoScrollSentinel: true, denoise: true,
+          bypassCsp: true, ignoreCertificateErrors: false, autoScrollSentinel: true, denoise: true,
           challengeWaitMs: 0, challengeRetries: 0, ...config,
         }))
       }
@@ -686,6 +836,7 @@ describe('MoliFetchProvider CDP backend', () => {
       cdpEndpoint: '',
       shareBrowserContext: false,
       bypassCsp: true,
+      ignoreCertificateErrors: false,
       autoScrollSentinel: true,
       denoise: true,
       challengeWaitMs: 0,
@@ -710,6 +861,38 @@ describe('MoliFetchProvider CDP backend', () => {
     expect(state.browserClosed).toBe(true)
   })
 
+  /**
+   * Teardown runs in `fetch`'s `finally`, so an unbounded close delays the error
+   * the caller is waiting for. `page.close()` issues a CDP command whose timeout
+   * is a hardcoded 60s; against a wedged daemon that turns a fetch which already
+   * hit its deadline into one that hangs for another minute. The lease arm — the
+   * only arm production takes — must be bounded like the others.
+   */
+  it('bounds teardown so a hung page close cannot outlive the deadline', async () => {
+    const { pool } = fakeCdpConnection({}, { hangClose: true })
+    const provider = new MoliFetchProvider(() => ({
+      backend: 'cdp',
+      moliPath: '',
+      cdpEndpoint: '',
+      shareBrowserContext: false,
+      bypassCsp: true,
+      ignoreCertificateErrors: false,
+      autoScrollSentinel: true,
+      denoise: true,
+      challengeWaitMs: 0,
+      challengeRetries: 0,
+    }), pool)
+
+    const started = Date.now()
+    const result = await provider.fetch({ url: 'https://example.com/x' })
+    const elapsed = Date.now() - started
+    // The fetch itself succeeded and closed on its own terms.
+    expect(result.statusCode).toBe(200)
+    // The hung close must be abandoned at the grace budget (1.5s), not awaited
+    // for the 60s a real CDP command timeout would impose.
+    expect(elapsed).toBeLessThan(CLOSE_GRACE_BUDGET_MS)
+  })
+
   it('runs many concurrent isolated CDP fetches as tabs without queueing', async () => {
     const { state, pool } = fakeCdpConnection()
     const provider = new MoliFetchProvider(() => ({
@@ -718,6 +901,7 @@ describe('MoliFetchProvider CDP backend', () => {
       cdpEndpoint: '',
       shareBrowserContext: false,
       bypassCsp: true,
+      ignoreCertificateErrors: false,
       autoScrollSentinel: true,
       denoise: true,
       challengeWaitMs: 0,
@@ -742,6 +926,7 @@ describe('MoliFetchProvider CDP backend', () => {
       cdpEndpoint: '',
       shareBrowserContext: true,
       bypassCsp: true,
+      ignoreCertificateErrors: false,
       autoScrollSentinel: true,
       denoise: true,
       challengeWaitMs: 0,
@@ -776,6 +961,7 @@ describe('MoliFetchProvider CDP backend', () => {
       cdpEndpoint: '',
       shareBrowserContext: true,
       bypassCsp: true,
+      ignoreCertificateErrors: false,
       autoScrollSentinel: true,
       denoise: true,
       challengeWaitMs: 0,
@@ -799,6 +985,7 @@ describe('MoliFetchProvider CDP backend', () => {
       cdpEndpoint: '',
       shareBrowserContext: true,
       bypassCsp: true,
+      ignoreCertificateErrors: false,
       autoScrollSentinel: true,
       denoise: true,
       challengeWaitMs: 0,
@@ -828,6 +1015,7 @@ describe('MoliFetchProvider CDP backend', () => {
       cdpEndpoint: '',
       shareBrowserContext: true,
       bypassCsp: true,
+      ignoreCertificateErrors: false,
       autoScrollSentinel: true,
       denoise: true,
       challengeWaitMs: 0,
@@ -837,7 +1025,7 @@ describe('MoliFetchProvider CDP backend', () => {
     await provider.fetch({ url: 'https://example.com/popup-spawner' })
     expect(state.popupListeners.length).toBeGreaterThan(0) // the guard attached
 
-    const popupState: FakePageState = { pageClosed: false, gotos: 0, scripts: [], contentCalls: 0 }
+    const popupState: FakePageState = { pageClosed: false, gotos: 0, scripts: [], contentCalls: 0, hookCommands: [] }
     const popup = makeFakePage({}, popupState)
     for (const listener of state.popupListeners) listener(popup) // page spawned a popup
     expect(popupState.pageClosed).toBe(true)
@@ -859,6 +1047,7 @@ describe('MoliFetchProvider CDP backend', () => {
       cdpEndpoint: '127.0.0.1:1',
       shareBrowserContext: true,
       bypassCsp: true,
+      ignoreCertificateErrors: false,
       autoScrollSentinel: true,
       denoise: true,
       challengeWaitMs: 0,
@@ -881,6 +1070,7 @@ describe('MoliFetchProvider CDP backend', () => {
         cdpEndpoint: '127.0.0.1:9222',
         shareBrowserContext: true,
         bypassCsp: true,
+        ignoreCertificateErrors: false,
         autoScrollSentinel: true,
         denoise: true,
         challengeWaitMs: 0,

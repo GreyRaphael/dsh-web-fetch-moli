@@ -11,6 +11,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-tools'
+import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-web'
 import { Config, effectiveTimeoutMs, resolveConfig } from './config.ts'
 import type { ResolvedConfig } from './config.ts'
@@ -96,6 +97,22 @@ export const inject = ['web']
 export const WEB_FETCH_MOLI_SETTINGS_NAMESPACE = 'web-fetch-moli'
 
 /**
+ * Extra headroom added to `web_fetch`'s tool budget on top of the provider's
+ * own deadline.
+ *
+ * `timeoutMs` is declarative metadata (`ToolDefinition.timeoutMs`): the platform's
+ * `timeout-policy` plugin reads it and arms its own `TOOL_TIMEOUT` deadline around
+ * dispatch, while this provider arms its own deadline from the same config value.
+ * If both were equal they would fire in the same tick and whichever timer ran
+ * first would decide the code — `TOOL_TIMEOUT` would then replace the more
+ * specific `WEB_FETCH_TIMEOUT`, and the caller would lose the reason the fetch
+ * actually failed. Keeping the tool budget strictly larger guarantees the
+ * provider's deadline expires first and owns the classification, while the tool
+ * layer stays a backstop for a provider that never settles at all.
+ */
+const TOOL_BUDGET_HEADROOM_MS = 5_000
+
+/**
  * Register the Moli fetch provider with `ctx.web`.
  *
  * `config` arrives with every field as a volatile reference when a Loader
@@ -108,22 +125,48 @@ export const WEB_FETCH_MOLI_SETTINGS_NAMESPACE = 'web-fetch-moli'
 export function apply(ctx: Context, config: Config = {}): void {
   const current = (): ResolvedConfig => resolveConfig(config)
 
-  // Hook into tools/execute to dynamically align session/preset-scoped web_fetch.timeoutMs with Moli's configured budget
+  // `web_fetch` is declared by `tool-web` with a 30s default budget, but this
+  // provider's deadline is configurable up to MAX_TIMEOUT_MS. A moli fetch that
+  // legitimately needs 90s would otherwise be killed by the tool layer at 30s.
+  //
+  // The budget has to be adjusted on the resolved per-agent tool definition
+  // because that is the object `timeout-policy` reads, and it is a shared
+  // registry object — so every write is recorded and undone on unload. Without
+  // the restore, an unload or a lowered setting would leave the tool carrying a
+  // raised budget forever, and a later remount would treat that as the baseline.
+  const originalTimeouts = new Map<ToolDefinition, number | undefined>()
   ctx.inject(['tools'], (toolsCtx) => {
     toolsCtx.on('tools/execute', (exec, next) => {
       if (exec.name === 'web_fetch') {
         const tool = toolsCtx.tools.get('web_fetch', exec.agent)
-        const budget = effectiveTimeoutMs(current())
-        if (tool !== undefined && (typeof tool.timeoutMs !== 'number' || tool.timeoutMs < budget)) {
-          tool.timeoutMs = budget
+        if (tool !== undefined) {
+          const budget = effectiveTimeoutMs(current()) + TOOL_BUDGET_HEADROOM_MS
+          if (typeof tool.timeoutMs !== 'number' || tool.timeoutMs < budget) {
+            if (!originalTimeouts.has(tool)) originalTimeouts.set(tool, tool.timeoutMs)
+            tool.timeoutMs = budget
+          }
         }
       }
       return next()
     }, { prepend: true })
+
+    toolsCtx.effect(() => () => {
+      for (const [tool, timeoutMs] of originalTimeouts) {
+        if (timeoutMs === undefined) delete tool.timeoutMs
+        else tool.timeoutMs = timeoutMs
+      }
+      originalTimeouts.clear()
+    }, 'dsh-web-fetch-moli: restore tool budgets')
   })
 
   const provider = new MoliFetchProvider(current)
-  ctx.effect(() => () => { void provider.dispose() }, 'dsh-web-fetch-moli: cleanup daemon and CDP')
+  ctx.effect(() => () => {
+    // Teardown is best-effort by contract (a disposer that rejects would abort
+    // the rest of the unload), but a silent rejection leaves no trace at all.
+    void provider.dispose().catch((error: unknown) => {
+      console.warn('[dsh-web-fetch-moli] cleanup failed:', error)
+    })
+  }, 'dsh-web-fetch-moli: cleanup daemon and CDP')
   ctx.web.registerFetchProvider(provider)
 
   // Proactively warm up / download binary in background on plugin startup.
