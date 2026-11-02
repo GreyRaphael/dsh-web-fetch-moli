@@ -221,7 +221,15 @@ describe('MoliProcessManager disposal and cleanup', () => {
       // The first child has now exited — its stale handler must not
       // deregister the live replacement.
       await stopping
-      expect(manager.children[0]?.exitCode).toBe(0)
+      const firstChild = manager.children[0]
+      if (process.platform === 'win32') {
+        // Windows does not support POSIX signals; Node emulates SIGTERM by
+        // forcefully terminating the process via TerminateProcess, which reports
+        // exitCode: null and signalCode: 'SIGTERM'.
+        expect(firstChild?.signalCode).toBe('SIGTERM')
+      } else {
+        expect(firstChild?.exitCode).toBe(0)
+      }
       expect(manager.childRef).toBe(manager.children[1])
     } finally {
       await manager.stop()
