@@ -9,11 +9,12 @@ import { resolveMoliBinary } from '../src/moli-resolve.ts'
  * poll keeps looping — the state the lifecycle races must interrupt. Its
  * SIGTERM trap turns `stop()`'s kill into a clean exit the poll can observe
  * via `exitCode !== null` (a signal-killed child leaves `exitCode` null).
+ * Writes to stderr so the test can deterministically wait until the trap is ready.
  */
-const FAKE_DAEMON_CODE = 'process.on("SIGTERM", () => process.exit(0)); setInterval(() => {}, 1000)'
+const FAKE_DAEMON_CODE = 'process.on("SIGTERM", () => process.exit(0)); process.stderr.write("READY\\n"); setInterval(() => {}, 1000)'
 
-/** The lingering variant: exits cleanly only 1.2s after its SIGTERM. */
-const LINGERING_DAEMON_CODE = 'process.on("SIGTERM", () => setTimeout(() => process.exit(0), 1200)); setInterval(() => {}, 1000)'
+/** The lingering variant: exits cleanly 400ms after its SIGTERM. */
+const LINGERING_DAEMON_CODE = 'process.on("SIGTERM", () => setTimeout(() => process.exit(0), 400)); process.stderr.write("READY\\n"); setInterval(() => {}, 1000)'
 
 /** SIGKILL the survivors of `children` and resolve once every child is reaped. */
 async function reap(children: ChildProcess[]): Promise<void> {
@@ -64,6 +65,9 @@ describe('MoliProcessManager disposal and cleanup', () => {
       const child = spawn(process.execPath, ['-e', this.daemonCode(this.children.length)], {
         stdio: ['ignore', 'pipe', 'pipe'],
       })
+      child.stderr?.once('data', () => {
+        ;(child as unknown as { _ready?: boolean })._ready = true
+      })
       this.children.push(child)
       return child
     }
@@ -101,6 +105,26 @@ describe('MoliProcessManager disposal and cleanup', () => {
       await new Promise(resolve => { setTimeout(resolve, 20) })
     }
     expect(manager.children.length).toBeGreaterThanOrEqual(count)
+  }
+
+  /** Wait until the fake daemon has booted and emitted its readiness byte. */
+  async function waitForDaemonReady(child: ChildProcess | undefined): Promise<void> {
+    if (!child) return
+    if ((child as unknown as { _ready?: boolean })._ready) return
+    if (child.exitCode !== null || child.signalCode !== null) return
+    await new Promise<void>((resolve) => {
+      let resolved = false
+      const done = () => {
+        if (!resolved) {
+          resolved = true
+          clearTimeout(timer)
+          resolve()
+        }
+      }
+      const timer = setTimeout(done, 2000)
+      child.stderr?.once('data', done)
+      child.once('exit', done)
+    })
   }
 
   it('stop() keeps the manager reusable while dispose() permanently rejects ensure()', async () => {
@@ -149,12 +173,7 @@ describe('MoliProcessManager disposal and cleanup', () => {
       const first = manager.ensure('/fake/moli', 1).catch((error: unknown) => error)
       pending.push(first)
       await waitForChildren(manager, 1)
-      // Let the daemon boot so its SIGTERM trap is installed: the stop()
-      // below must land as a clean exit the poll observes via
-      // `exitCode !== null`, not a signal death that leaves the poll running
-      // to its 5s deadline (whose recovery stop() would clobber the
-      // replacement this test is about).
-      await new Promise(resolve => { setTimeout(resolve, 300) })
+      await waitForDaemonReady(manager.children[0])
 
       // stop() kills the daemon and clears the dedup slot while the first
       // attempt is still winding down; the replacement registers its own
@@ -190,10 +209,7 @@ describe('MoliProcessManager disposal and cleanup', () => {
     try {
       pending.push(manager.ensure('/fake/moli', 1).catch((error: unknown) => error))
       await waitForChildren(manager, 1)
-      // Let the daemon boot so its delayed-exit SIGTERM trap is installed
-      // before stop() fires; otherwise the signal would kill it outright and
-      // its exit would land before — not after — the replacement registers.
-      await new Promise(resolve => { setTimeout(resolve, 300) })
+      await waitForDaemonReady(manager.children[0])
 
       // stop() lingers on the first child's delayed exit; the replacement
       // ensure() takes over the child reference long before that exit lands.
@@ -294,11 +310,11 @@ describe('MoliProcessManager disposal and cleanup', () => {
     // A child that traps SIGTERM and stays alive: stop()'s exit-race promise
     // must still resolve within its hard cap instead of hanging forever.
     const manager = new MoliProcessManager()
-    const stubborn = spawn(process.execPath, ['-e', 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000)'], {
+    const stubborn = spawn(process.execPath, ['-e', 'process.on("SIGTERM", () => {}); process.stderr.write("READY\\n"); setInterval(() => {}, 1000)'], {
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     // Let the child install its SIGTERM trap before we try to stop it.
-    await new Promise(resolve => { setTimeout(resolve, 300) })
+    await waitForDaemonReady(stubborn)
     // Sneak the child in through the same fields the manager owns.
     ;(manager as unknown as { child: typeof stubborn }).child = stubborn
     ;(manager as unknown as { endpoint: string }).endpoint = 'http://127.0.0.1:1'
