@@ -1,4 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { createHash } from 'node:crypto'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { describe, expect, it, vi } from 'vitest'
 import {
   downloadLatestMoliBinary,
   fetchLatestMoliReleaseTag,
@@ -12,6 +16,7 @@ import {
   resolveCdpBackend,
   resolveMoliBinary,
   syncLatestMoliBinary,
+  verifyArchiveDigest,
   withFsLockRetry,
 } from '../src/moli-resolve.ts'
 
@@ -187,3 +192,85 @@ describe('moli-resolve', () => {
   })
 })
 
+
+describe('release digest verification (supply-chain integrity)', () => {
+  const ASSET = 'moli-x86_64-unknown-linux-gnu.tar.gz'
+
+  /** Write a temp archive whose sha256 the caller can predict. */
+  async function archiveWith(content: string): Promise<{ path: string; sha256: string; dir: string }> {
+    const dir = mkdtempSync(join(tmpdir(), 'moli-digest-'))
+    const path = join(dir, 'asset.tar.gz')
+    writeFileSync(path, content)
+    const sha256 = createHash('sha256').update(content).digest('hex')
+    return { path, sha256, dir }
+  }
+
+  it('accepts an archive whose digest matches the release metadata', async () => {
+    const { path, sha256, dir } = await archiveWith('trusted payload')
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {})
+    try {
+      await expect(
+        verifyArchiveDigest(path, ASSET, [{ name: ASSET, digest: `sha256:${sha256}` }]),
+      ).resolves.toBeUndefined()
+      expect(info.mock.calls.flat().join(' ')).toContain('verified')
+    } finally {
+      info.mockRestore()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects an archive whose digest does not match, before any extraction', async () => {
+    const { path, dir } = await archiveWith('tampered payload')
+    try {
+      await expect(
+        verifyArchiveDigest(path, ASSET, [{ name: ASSET, digest: `sha256:${'0'.repeat(64)}` }]),
+      ).rejects.toThrow(/refusing to install a tampered or truncated archive/)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('warns loudly instead of silently proceeding when no digest is published', async () => {
+    const { path, dir } = await archiveWith('unverified payload')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      await expect(
+        verifyArchiveDigest(path, ASSET, [{ name: ASSET, digest: undefined }]),
+      ).resolves.toBeUndefined()
+      const said = warn.mock.calls.flat().join(' ')
+      expect(said).toContain('integrity NOT verified')
+      expect(said).toContain(ASSET)
+    } finally {
+      warn.mockRestore()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('warns when the release metadata itself is unreachable', async () => {
+    const { path, dir } = await archiveWith('offline payload')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      await expect(verifyArchiveDigest(path, ASSET, undefined)).resolves.toBeUndefined()
+      const said = warn.mock.calls.flat().join(' ')
+      expect(said).toContain('integrity NOT verified')
+      expect(said).toContain('unreachable')
+    } finally {
+      warn.mockRestore()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('treats an unrecognized digest format as unverified rather than failed', async () => {
+    const { path, dir } = await archiveWith('odd format payload')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      await expect(
+        verifyArchiveDigest(path, ASSET, [{ name: ASSET, digest: 'unsupported:abc' }]),
+      ).resolves.toBeUndefined()
+      expect(warn.mock.calls.flat().join(' ')).toContain('unrecognized digest format')
+    } finally {
+      warn.mockRestore()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})

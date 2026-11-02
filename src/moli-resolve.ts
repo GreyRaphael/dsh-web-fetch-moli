@@ -257,8 +257,110 @@ export async function fetchLatestMoliReleaseTag(): Promise<string | null> {
   return null
 }
 
+/**
+ * Fetch the release asset digests, or undefined when they cannot be read.
+ *
+ * A seam rather than a direct call so tests can drive both integrity branches
+ * (match, mismatch, absent) without the network. `tests/moli-resolve.spec.ts`
+ * substitutes it; production always reaches the API.
+ * @returns release asset metadata, or undefined when unreachable.
+ */
+let releaseDigestSource: () => Promise<MoliReleaseAssetDigest[] | undefined> = fetchLatestMoliReleaseAssetDigests
+
+/**
+ * Override how the download path obtains release digests.
+ * @param source - replacement reader, or undefined to restore the API reader.
+ */
+export function setReleaseDigestSourceForTests(source: (() => Promise<MoliReleaseAssetDigest[] | undefined>) | undefined): void {
+  releaseDigestSource = source ?? fetchLatestMoliReleaseAssetDigests
+}
+
+/** Read digests through the active seam. */
+async function resolveReleaseDigests(): Promise<MoliReleaseAssetDigest[] | undefined> {
+  try {
+    return await releaseDigestSource()
+  } catch {
+    // An unreachable/throwing reader must not fail the install; the verifier
+    // reports the unverified state itself.
+    return undefined
+  }
+}
+
 /** In-flight binary sync promises keyed by destination directory. */
 const inFlightSyncs = new Map<string, Promise<void>>()
+
+/**
+ * GitHub REST endpoint describing the latest release, including per-asset
+ * digests.
+ *
+ * This is a second API call on purpose: the packument-free `/releases/latest`
+ * redirect (which {@link fetchLatestMoliReleaseTag} follows) yields only a tag,
+ * while the integrity metadata this plugin verifies against is published on the
+ * REST resource. One extra request on the (rarer) download path buys a real
+ * supply-chain control, and a failure here degrades to "unverified" rather than
+ * blocking the install.
+ */
+const MOLI_LATEST_RELEASE_API_URL = `https://api.github.com/repos/${MOLI_REPO_SLUG}/releases/latest`
+
+/** One release asset as the integrity check needs it. */
+export interface MoliReleaseAssetDigest {
+  /** Asset filename exactly as the release publishes it (e.g. `moli-x86_64-unknown-linux-gnu.tar.gz`). */
+  name: string
+  /**
+   * GitHub's `digest` field, `sha256:<hex>`, or undefined when the release was
+   * published before GitHub started computing digests.
+   */
+  digest: string | undefined
+}
+
+/**
+ * Read the latest release's asset digests from the GitHub REST API.
+ *
+ * Every failure mode (no curl, no network, rate limit, unexpected JSON shape)
+ * returns `undefined` so the caller can warn and proceed: an install that cannot
+ * reach the API must still work, it just cannot claim to be verified.
+ *
+ * @returns asset name → digest entries, or undefined when the metadata is unreachable.
+ */
+export async function fetchLatestMoliReleaseAssetDigests(): Promise<MoliReleaseAssetDigest[] | undefined> {
+  let body: string | null = null
+  try {
+    body = await runCommand(
+      'curl',
+      ['-sfL', '--connect-timeout', '5', '--max-time', '15', '-H', 'Accept: application/vnd.github+json', MOLI_LATEST_RELEASE_API_URL],
+      { timeout: 20_000 },
+    )
+  } catch {
+    try {
+      const resp = await fetch(MOLI_LATEST_RELEASE_API_URL, {
+        headers: { accept: 'application/vnd.github+json' },
+        signal: AbortSignal.timeout(15_000),
+      })
+      if (resp.ok) body = await resp.text()
+    } catch {
+      // Unreachable metadata — the caller warns and installs unverified
+    }
+  }
+  if (body === null) return undefined
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(body)
+  } catch {
+    return undefined
+  }
+  const assets = (parsed as { assets?: unknown }).assets
+  if (!Array.isArray(assets)) return undefined
+
+  const entries: MoliReleaseAssetDigest[] = []
+  for (const asset of assets) {
+    if (typeof asset !== 'object' || asset === null) continue
+    const { name, digest } = asset as { name?: unknown; digest?: unknown }
+    if (typeof name !== 'string') continue
+    entries.push({ name, digest: typeof digest === 'string' && digest.length > 0 ? digest : undefined })
+  }
+  return entries
+}
 
 /** Default check interval for Moli upstream releases (24 hours). */
 export const DEFAULT_MOLI_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000
@@ -563,7 +665,7 @@ export async function downloadLatestMoliBinary(
         await pipeline(Readable.fromWeb(response.body as any), createWriteStream(tempArchive))
       }
 
-      await verifyArchiveChecksumIfPublished(tempArchive, downloadUrl)
+      await verifyArchiveDigest(tempArchive, filename, await resolveReleaseDigests())
 
       if (isZip) {
         try {
@@ -633,38 +735,60 @@ export async function downloadLatestMoliBinary(
 }
 
 /**
- * Verify the downloaded archive against the upstream `<asset>.sha256` file
- * when the release publishes one. GreyRaphael/moli currently ships no
- * checksum assets, so verification is opportunistic: absent checksum →
- * proceed as today; published checksum → hard-fail the install on mismatch,
- * so a tampered or truncated archive stops here instead of being chmod'ed
- * and executed. Runs only on the (rare) download path — never per fetch.
+ * Verify the downloaded archive against the digest the release metadata
+ * publishes for it.
+ *
+ * The upstream release publishes no `<asset>.sha256` companion file — measured
+ * 404 on every asset — while the GitHub REST API does expose `assets[].digest`.
+ * Looking for the companion file therefore found nothing and returned silently,
+ * which made "opportunistic verification" mean "no verification": a tampered or
+ * truncated archive was extracted, `chmod 0755`'d and executed with HTTPS as the
+ * only control. Reading the API digest instead makes the check real.
+ *
+ * A present digest that does not match aborts the install before extraction.
+ * An *absent* digest (older releases, unreachable API, rate limit) warns loudly
+ * and proceeds: refusing to install would break first-run on a network that
+ * cannot reach api.github.com, but silence would make the gap invisible.
+ *
+ * Runs only on the download path — never per fetch.
+ * @param archivePath - the downloaded archive on disk.
+ * @param assetName - asset filename to look up in the release metadata.
+ * @param digests - release asset metadata, or undefined when unreachable.
  */
-async function verifyArchiveChecksumIfPublished(archivePath: string, downloadUrl: string): Promise<void> {
-  const checksumUrl = `${downloadUrl}.sha256`
-  let text: string | null = null
-  try {
-    text = (await runCommand('curl', ['-sfL', '--connect-timeout', '5', '--max-time', '15', checksumUrl], { timeout: 20_000 })).trim()
-  } catch {
-    try {
-      const resp = await fetch(checksumUrl, { signal: AbortSignal.timeout(15_000) })
-      if (resp.ok) text = (await resp.text()).trim()
-    } catch {
-      // No checksum asset reachable — verification stays opportunistic
-    }
+export async function verifyArchiveDigest(
+  archivePath: string,
+  assetName: string,
+  digests: MoliReleaseAssetDigest[] | undefined,
+): Promise<void> {
+  const expectedRaw = digests?.find(entry => entry.name === assetName)?.digest
+  if (expectedRaw === undefined) {
+    console.warn(
+      `[dsh-web-fetch-moli] integrity NOT verified for ${assetName}: ` +
+      `${digests === undefined
+        ? 'the release metadata (api.github.com) was unreachable'
+        : 'the release publishes no digest for this asset'}. ` +
+      'The downloaded binary will be installed and executed, authenticated only by HTTPS.',
+    )
+    return
   }
-  if (text === null) return
-  // Accept both the sha256sum format ("<hash>  <filename>") and a bare hash.
-  const expected = text.match(/\b([0-9a-f]{64})\b/i)?.[1]?.toLowerCase()
-  if (expected === undefined) return
+  // GitHub publishes `sha256:<hex>`; tolerate a bare hex too so a future format
+  // change degrades to "still checked" rather than "silently unverified".
+  const expected = expectedRaw.match(/\b([0-9a-f]{64})\b/i)?.[1]?.toLowerCase()
+  if (expected === undefined) {
+    console.warn(
+      `[dsh-web-fetch-moli] integrity NOT verified for ${assetName}: ` +
+      `unrecognized digest format ${JSON.stringify(expectedRaw)}. Proceeding under HTTPS only.`,
+    )
+    return
+  }
   const actual = await sha256File(archivePath)
   if (actual !== expected) {
     throw new Error(
-      `checksum verification failed for ${downloadUrl}: expected sha256 ${expected}, got ${actual}; ` +
-      `refusing to install a tampered or truncated archive`,
+      `checksum verification failed for ${assetName}: expected sha256 ${expected}, got ${actual}; ` +
+      'refusing to install a tampered or truncated archive',
     )
   }
-  console.info('[dsh-web-fetch-moli] verified Moli archive against upstream sha256 checksum')
+  console.info(`[dsh-web-fetch-moli] verified ${assetName} against the release digest (sha256:${actual})`)
 }
 
 /** Stream a file through SHA-256 without buffering it whole in memory. */
