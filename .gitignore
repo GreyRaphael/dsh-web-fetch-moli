@@ -4,3 +4,4 @@ lib/
 .pnpm-store/
 test-results/
 scratch/
+review/

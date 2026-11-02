@@ -39,7 +39,10 @@ The test suite deliberately needs no Moli binary on CI for pure unit tests; live
 - `pnpm typecheck` and `pnpm test` must pass.
 - Any behavior change to the fetch pipeline (navigation, denoise, caps, error taxonomy) needs a test: a unit case where pure, or a fake-browser case in `tests/provider.spec.ts` where not.
 - Browser-half changes (settings card, form model, locales) need no browser, but keep the client bundle self-contained: `tsdown.config.ts` enforces that at build time — no Node builtins, no `@deepseek-ai/*` value imports.
+- If you touch `cordis.patch.yml`: a patch replaces the targeted row's **whole** `config`, so every key the base bundle sets on that row must be restated or it is silently dropped. The file's header comment documents the two rows this package overrides and why each key is present.
 - Bump the version for every user-visible change; update `CHANGELOG.md` in the same commit.
+
+CI runs `pnpm typecheck`, `pnpm test`, `pnpm build`, and a pack-content verification on Linux and Windows across Node 22 and 24. The pack check asserts the tarball actually contains `lib/index.js`, `lib/client.js`, both `lib/types/**` entries, and `cordis.patch.yml`, and that `dsh.client.external` matches the `require` specifiers found in `lib/client.js`. Only the Linux runners additionally install a real Moli binary, so browser-integration specs self-skip on Windows — a green Windows job does not prove the browser path works.
 
 ## Commit conventions
 
@@ -47,11 +50,16 @@ Small, focused commits that describe the change in the imperative mood (`fix: �
 
 ## Releasing
 
+There are **two separate, deliberately manual paths**. GitHub Releases are automated from a tag; npm is not.
+
 1. Bump `version` in `package.json` and add a `CHANGELOG.md` entry.
-2. Push to `main`; CI (typecheck, test, build, pack verification) must be green.
-3. `pnpm publish` — `prepublishOnly` builds the shipped `lib/`; the npm package is the prebuilt distribution, so `dsh plugin add dsh-web-fetch-moli` needs no build permission.
-4. Tag and release: `git tag -a v<version> -m "Release …" && git push origin v<version>`, then a GitHub Release pointing at the same commit.
-5. Registry indexes (npm `latest`, marketplace topic scans) update on their own schedules; no manual step.
+2. Update `.github/release-notes.md` so it carries a `## [<version>]` heading for the version being released. `release.yml` fails the release otherwise — that file is otherwise version-independent and every tag would reuse the same body.
+3. Push to `main`; CI (typecheck, test, build, pack verification) must be green.
+4. **npm (manual):** `pnpm publish` — `prepublishOnly` builds the shipped `lib/`; the npm package is the prebuilt distribution, so `dsh plugin add dsh-web-fetch-moli` needs no build permission. No workflow publishes to npm and there is no `npm publish` step in this repository, so this is a local action against your own npm credentials.
+5. **GitHub Release (automated from the tag):** `git tag -a v<version> -m "Release …" && git push origin v<version>`. The `Release` workflow then verifies the tag matches `package.json`, both version anchors exist, builds, packs, and attaches the `.tgz` with `.github/release-notes.md` as the body.
+6. Registry indexes (npm `latest`, marketplace topic scans) update on their own schedules; no manual step.
+
+Because npm and GitHub Releases are independent, they can drift: a tag can ship without the npm package being published, and vice versa. The README documents the GitHub install path as the reliable one until a version is actually on npm.
 
 ## License
 

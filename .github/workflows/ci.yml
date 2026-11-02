@@ -46,8 +46,110 @@ jobs:
       - name: Build
         run: pnpm build
 
-      # Tarball content check is platform-independent; /tmp + tar + grep
-      # piping assumes a POSIX shell, so it stays on the Linux runners.
       - name: Verify package contents
-        if: matrix.os == 'ubuntu-latest'
-        run: pnpm pack --pack-destination /tmp/dsh-web-fetch-moli-pack && tar -tzf /tmp/dsh-web-fetch-moli-pack/*.tgz | grep -q '^package/lib/index.js$' || (echo 'lib/index.js missing from package' && exit 1)
+        shell: bash
+        run: |
+          pnpm pack --pack-destination "$RUNNER_TEMP/pack"
+          node -e '
+          	const { execFileSync } = require("node:child_process");
+          	const { readFileSync, readdirSync, mkdtempSync } = require("node:fs");
+          	const { tmpdir } = require("node:os");
+          	const { join } = require("node:path");
+
+          	const dir = process.argv[1];
+          	const [tgz] = readdirSync(dir).filter(f => f.endsWith(".tgz"));
+          	if (!tgz) throw new Error(`no .tgz produced in ${dir}`);
+
+          	// Parse the tar listing in Node rather than `tar | grep`: a piped
+          	// `grep -q` exits early and the writer dies of SIGPIPE, which turns
+          	// into a spurious failure the moment the runner sets pipefail.
+          	const listing = execFileSync("tar", ["-tzf", join(dir, tgz)], { encoding: "utf8" });
+          	const entries = new Set(listing.split("\n").map(l => l.trim()));
+          	for (const required of [
+          		"package/lib/index.js",       // host ESM bundle
+          		"package/lib/client.js",      // browser module-registration bundle
+          		"package/lib/types/index.d.ts",
+          		"package/lib/types/client/index.d.ts",
+          		"package/cordis.patch.yml",   // the bundle layer; without it fetchProvider never flips to moli
+          		"package/package.json",
+          		"package/README.md",
+          		"package/LICENSE",
+          	]) {
+          		if (!entries.has(required)) throw new Error(`missing from tarball: ${required}`);
+          	}
+
+          	const extract = mkdtempSync(join(tmpdir(), "pack-smoke-"));
+          	execFileSync("tar", ["-xzf", join(dir, tgz), "-C", extract]);
+          	const pkgRoot = join(extract, "package");
+          	const manifest = JSON.parse(readFileSync(join(pkgRoot, "package.json"), "utf8"));
+
+          	if (typeof manifest.engines?.dsh !== "string" || manifest.dsh?.engines !== undefined) {
+          		throw new Error("package.json must declare engines.dsh at top level (not under dsh.engines)");
+          	}
+
+          	// 1. Both bundles must at least be syntactically loadable. A full
+          	//    dynamic import of the host entry is not possible here: it
+          	//    imports the DSH peer packages, which a packed tarball does not
+          	//    carry by design. `--check` still catches a truncated or
+          	//    corrupt build artifact, which is the failure this step exists
+          	//    to catch.
+          	for (const file of [manifest.main, "lib/client.js"]) {
+          		execFileSync(process.execPath, ["--check", join(pkgRoot, file)], { stdio: "inherit" });
+          	}
+
+          	// 2. The client bundle registers itself with the host module loader.
+          	const clientSrc = readFileSync(join(pkgRoot, "lib/client.js"), "utf8");
+          	if (!clientSrc.includes("__ModuleLoader__.load")) {
+          		throw new Error("lib/client.js does not call window.__ModuleLoader__.load");
+          	}
+
+          	// 3. Every module-table request the bundle makes must be served by the
+          	//    shell baseline (PLATFORM_MODULES in dsh >=0.2.1-rc.3) or declared
+          	//    in dsh.client.external, and every dsh.client.external entry must be
+          	//    a non-baseline module the bundle actually requires.
+          	const platformModules = new Set([
+          		"react",
+          		"react/jsx-runtime",
+          		"react-dom",
+          		"react-dom/client",
+          		"@deepseek-ai/cordis",
+          		"@deepseek-ai/dsh-client-store",
+          		"@deepseek-ai/dsh-client-ui-slots",
+          		"@deepseek-ai/dsh-client-ui-primitives",
+          		"@deepseek-ai/dsh-client-ui-dockkit",
+          	]);
+          	const requires = new Set(
+          		[...clientSrc.matchAll(/require\(\s*["\x27]([^"\x27]+)["\x27]\s*\)/g)].map(m => m[1]),
+          	);
+          	const external = new Set(manifest.dsh?.client?.external ?? []);
+          	for (const spec of requires) {
+          		if (!platformModules.has(spec) && !external.has(spec)) {
+          			throw new Error(`lib/client.js requires ${spec}, which is neither a platform module nor declared in dsh.client.external`);
+          		}
+          	}
+          	for (const spec of external) {
+          		if (platformModules.has(spec)) {
+          			throw new Error(`dsh.client.external declares baseline platform module ${spec}`);
+          		}
+          		if (!requires.has(spec)) {
+          			throw new Error(`dsh.client.external declares ${spec}, which lib/client.js never requires`);
+          		}
+          	}
+
+          	// 4. Published .d.ts files must only name specifiers a consumer can
+          	//    resolve; a bare "cordis" import inside lib/types/** is
+          	//    unimportable outside a workspace alias (TS2307 for consumers).
+          	const walkDts = (d) => readdirSync(d, { withFileTypes: true }).flatMap((e) => {
+          		const full = join(d, e.name);
+          		return e.isDirectory() ? walkDts(full) : (e.name.endsWith(".d.ts") ? [full] : []);
+          	});
+          	for (const file of walkDts(join(pkgRoot, "lib", "types"))) {
+          		const source = readFileSync(file, "utf8");
+          		const bareCordis = /(?:from|import)\s*\(?\s*["\x27]cordis(?:\/[^"\x27]*)?["\x27]/g;
+          		if (bareCordis.test(source)) {
+          			throw new Error(`${file.slice(pkgRoot.length + 1)} imports the bare "cordis" specifier`);
+          		}
+          	}
+
+          	console.log(`tarball OK: ${tgz} (${entries.size} entries, main=${manifest.main}, client requires=[${[...requires].join(", ")}])`);
+          ' "$RUNNER_TEMP/pack"

@@ -44,6 +44,7 @@ describe('Bailian micro-frontend real-world benchmark', () => {
       cdpEndpoint: '',
       shareBrowserContext: true,
       bypassCsp: true,
+      ignoreCertificateErrors: false,
       autoScrollSentinel: true,
       denoise: true,
       maxConcurrency: 4,

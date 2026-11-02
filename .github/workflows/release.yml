@@ -24,6 +24,34 @@ jobs:
             exit 1
           fi
 
+      # The GitHub Release body is the checked-in `.github/release-notes.md`,
+      # which is otherwise version-independent: every tag would ship the same
+      # text. Require both that file and CHANGELOG.md to carry a heading for
+      # THIS version, so a forgotten changelog edit fails the release instead
+      # of silently publishing stale notes.
+      - name: Verify release notes and CHANGELOG cover this version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          node -e '
+          	const { readFileSync } = require("node:fs");
+          	const version = process.argv[1];
+          	const escape = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          	// Matches "## [0.7.0]" and "## 0.7.0" but not "## [0.7.0]" inside a
+          	// larger version like 0.7.01 (the trailing guard).
+          	const heading = new RegExp(`^##+\\s*\\[?${escape(version)}\\]?(?![\\d.])`, "m");
+
+          	const changelog = readFileSync("CHANGELOG.md", "utf8");
+          	if (!heading.test(changelog)) {
+          		throw new Error(`CHANGELOG.md has no "## [${version}]" section; add one before tagging`);
+          	}
+
+          	const notes = readFileSync(".github/release-notes.md", "utf8");
+          	if (!heading.test(notes)) {
+          		throw new Error(`.github/release-notes.md has no "## [${version}]" heading; every tag would reuse the same body`);
+          	}
+          	console.log(`release notes and CHANGELOG both cover ${version}`);
+          ' "$version"
+
       - uses: pnpm/action-setup@v4
         with:
           version: 12
