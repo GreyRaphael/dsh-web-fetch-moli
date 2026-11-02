@@ -53,7 +53,7 @@ jobs:
           pnpm pack --pack-destination "$RUNNER_TEMP/pack"
           node -e '
           	const { execFileSync } = require("node:child_process");
-          	const { readFileSync, readdirSync, mkdtempSync } = require("node:fs");
+          	const { readFileSync, readdirSync, mkdtempSync, existsSync } = require("node:fs");
           	const { tmpdir } = require("node:os");
           	const { join } = require("node:path");
 
@@ -61,10 +61,14 @@ jobs:
           	const [tgz] = readdirSync(dir).filter(f => f.endsWith(".tgz"));
           	if (!tgz) throw new Error(`no .tgz produced in ${dir}`);
 
-          	// Parse the tar listing in Node rather than `tar | grep`: a piped
-          	// `grep -q` exits early and the writer dies of SIGPIPE, which turns
-          	// into a spurious failure the moment the runner sets pipefail.
-          	const listing = execFileSync("tar", ["-tzf", join(dir, tgz)], { encoding: "utf8" });
+          	const tarBin = process.platform === "win32" && existsSync(join(process.env.SystemRoot || process.env.WINDIR || "C:\\Windows", "System32", "tar.exe"))
+          		? join(process.env.SystemRoot || process.env.WINDIR || "C:\\Windows", "System32", "tar.exe")
+          		: "tar";
+
+          	const tgzData = readFileSync(join(dir, tgz));
+
+          	// Pass archive via stdin to avoid path/colon parsing bugs in GNU tar on Windows/Git Bash.
+          	const listing = execFileSync(tarBin, ["-tz"], { input: tgzData, encoding: "utf8" });
           	const entries = new Set(listing.split("\n").map(l => l.trim()));
           	for (const required of [
           		"package/lib/index.js",       // host ESM bundle
@@ -80,7 +84,7 @@ jobs:
           	}
 
           	const extract = mkdtempSync(join(tmpdir(), "pack-smoke-"));
-          	execFileSync("tar", ["-xzf", join(dir, tgz), "-C", extract]);
+          	execFileSync(tarBin, ["-xz"], { cwd: extract, input: tgzData });
           	const pkgRoot = join(extract, "package");
           	const manifest = JSON.parse(readFileSync(join(pkgRoot, "package.json"), "utf8"));
 
