@@ -1,7 +1,7 @@
 {
   "name": "dsh-web-fetch-moli",
-  "version": "0.7.0",
-  "description": "Moli (ultra-lightweight Rust headless browser) web-fetch provider for DeepSeek Harness: renders complex SPAs, micro-frontends, and static pages with ~60MB memory.",
+  "version": "0.8.0",
+  "description": "Moli (ultra-lightweight Rust headless browser) web-fetch provider for DeepSeek Harness: renders complex SPAs, micro-frontends, and static pages in a single lightweight process.",
   "type": "module",
   "license": "MIT",
   "main": "lib/index.js",
@@ -18,7 +18,8 @@
     }
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22",
+    "dsh": ">=0.2.1-rc.3 <0.3.0"
   },
   "files": [
     "lib",
@@ -44,15 +45,9 @@
       "platform": "web",
       "inject": [
         "@deepseek-ai/dsh-client-locale",
-        "@deepseek-ai/dsh-client-ui-settings"
-      ],
-      "external": [
-        "@deepseek-ai/dsh-client-store",
-        "@deepseek-ai/dsh-client-ui-primitives"
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-plugin-manager"
       ]
-    },
-    "engines": {
-      "dsh": ">=0.1.7-alpha.1"
     }
   },
   "keywords": [
@@ -80,13 +75,19 @@
   },
   "disclosure": {
     "cloud": false,
-    "network": [],
+    "network": [
+      "network:fetch (renders the user-requested URLs in a local Moli daemon or over a remote CDP connection, including the page's own subresources)",
+      "network:release-check (github.com/GreyRaphael/moli/releases/latest and api.github.com, on cold start + every 24h + on plugin version change)",
+      "network:download (GitHub Releases asset download for the Moli binary, when no local binary is found or a newer release exists)",
+      "network:connect (user-configured or managed CDP endpoint)"
+    ],
     "offlineMode": false,
     "apiKeys": [],
     "permissions": [
-      "network:fetch (renders the URLs the user requests in local Moli or CDP, including CDP profile mode with remote browser sessions)",
-      "network:connect (user-configured or managed CDP endpoint)",
-      "fs:read (user-configured moli executable path)"
+      "fs:read (user-configured moli executable path; ~/.cache/moli)",
+      "fs:write (~/.cache/moli: downloaded archive, extracted binary, and the .plugin-version check stamp)",
+      "fs:exec (chmod 0755 on the extracted Moli binary)",
+      "process:exec (spawns 'moli serve' as a managed daemon; runs 'tar' / 'powershell Expand-Archive' to unpack the archive)"
     ],
     "jurisdiction": [],
     "retention": "none"
@@ -102,8 +103,8 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.0.3 <5",
-    "@deepseek-ai/dsh-tools": ">=0.1.7-alpha.1 <0.3.0",
-    "@deepseek-ai/dsh-web": ">=0.1.7-alpha.1 <0.3.0"
+    "@deepseek-ai/dsh-tools": ">=0.2.1-rc.3 <0.3.0",
+    "@deepseek-ai/dsh-web": ">=0.2.1-rc.3 <0.3.0"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/cordis": {

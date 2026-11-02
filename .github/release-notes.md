@@ -1,49 +1,29 @@
+## [0.8.0]
+
 ## 主要更新
 
-### 1. 修复设置卡片在 DSH 0.1.7+ 完全消失
+### 1. 全面对齐 DeepSeek Harness `dsh-v0.2.1-rc.3+` 平台契约
+- **引擎与依赖范围收紧**：`package.json` 将 `engines.dsh` 移至顶层宿主读取路径，明确限定为 `">=0.2.1-rc.3 <0.3.0"`；`peerDependencies`（`@deepseek-ai/dsh-tools`、`@deepseek-ai/dsh-web`）同步收紧为 `">=0.2.1-rc.3 <0.3.0"`。
+- **客户端基线模块解耦**：遵循 DSH `rc.3+` 隐式 `PLATFORM_MODULES` 规范，移除 `dsh.client.external` 中的平台基线包声明；在 `dsh.client.inject` 补齐 `@deepseek-ai/dsh-client-ui-plugin-manager`。
+- **构建精简与类型安全**：消除 `createSnapshotStore` 死值导入与 `paths.cordis` 别名，产物直接使用规范 `@deepseek-ai/cordis`。
 
-这是本次最重要的修复。症状是「DSH 更新后，插件配置项不见了」——而 `web_fetch` 抓取本身仍然工作，所以很容易误判为界面问题。
+### 2. 宿主核心稳定性与 DoS 防护
+- **修复 patch 覆盖 searchProvider 缺陷（P0）**：在 `cordis.patch.yml` 的 `web` 行显式声明 `searchProvider: deepseek-official`，解决 DSH 全行覆盖机制导致的 `WEB_PROVIDER_AMBIGUOUS`。
+- **DOM 深度与节点预算保护（P0）**：在 Readability 评分前执行显式栈 DFS `clampDepth`（深度上限 128）与 12,000 节点预算截断，彻底消除深层/超宽 DOM 导致的同步阻塞 DoS（1024 层 DOM 耗时由 ~45s 降至 ~200ms）。
+- **CDP 租约关闭与连接池生命周期保护（P1）**：标签页释放增加 1.5s 超时兜底，防止 CDP 连接挂死；`CdpConnectionPool` 增加终态 `disposed` 守卫，杜绝卸载期连接复活。
+- **内容类型扩充**：支持 `application/xml`、`*+json` 与 `*+xml` 等结构化文档放行。
 
-根因：DSH 在 `0.1.7-alpha.1`（`601d6761e4` / PR #4587）用 `SettingsForms` 整体替换了 `SettingsProvider`，删除了 `ctx.settings.installSection` / `register` / `settingsNamespace` 整套 API。旧代码调用抛出的是被 cordis 捕获、**只写进启动日志**的 `TypeError`，插件主体照常注册，于是设置卡静默消失。
+### 3. Cloudflare 人机验证探针与降噪优化
+- **双探针一致性与防误报（P1）**：代码块剥离提前至结构标记扫描之前，消除技术文章中引用 Cloudflare 路径导致的误判；补齐 `[name="cf-challenge"]` 选择器，确保三套检测入口结论严格一致。
+- **降噪保真度提升**：保留文章容器内的 `<header>`/`<footer>` 结构（标题与作者信息），回退容器按最大文本量选取；状态机保留代码块内部空行；修复包含前导换行的 Data-URI 解析。
 
-迁移到新契约的关键点：`Config` 的每个字段必须声明 `.volatile()`。设置域用 `volatileForm(schema)` 过滤条目，**没有任何 volatile 字段的 schema 会被整条跳过、连表单都不产生**。同时 volatile 也是热更新的机制——保存后 Loader 原地替换引用并发出 `loader/volatile-update`，不重挂插件。
+### 4. 供应链安全与 Web 设置面板完善
+- **二进制 SHA-256 校验**：改用 GitHub Release API `assets[].digest` 进行解包前完整性校验，不可达时发出显式未验证告警。
+- **配置项补齐**：Web UI 设置卡片与宿主同步新增 `ignoreCertificateErrors` 开关，词典补齐中英文多语言文案，全面清理历史残留数据。
 
-新增 `dsh.engines.dsh: ">=0.1.7-alpha.1"`，版本不满足时在安装/激活阶段就明确报错，而不是运行时静默失效。
-
-### 2. 客户端删除 935 行手工转写层
-
-`form.ts`(396) / `fields.tsx`(195) / `PluginCard.tsx`(71) 及两份 CSS(317) 原本是官方 `SettingsFormModel` + `ui-primitives` 的手工副本，文件头写的理由是 "external client bundles cannot value-import `@deepseek-ai/*` packages"。
-
-该限制来自插件自己的 purity gate，而 rc.3 的浏览器壳层已把 `dsh-client-store` 与 `dsh-client-ui-primitives` 种入冻结模块表，前提不再成立。改用平台组件后 `lib/client.js` 从 36.4KB 降至 21.9KB（**−39%**），只剩三个 require，全部命中模块表。
-
-插件自己只保留两处平台未覆盖的形状：backend 单选组（两个选项要联动禁用其它字段）、复选框旁的「已覆盖 + 恢复默认」徽章。
-
-### 3. 依赖与工具链
-
-- 声明项 29 → 23，删除 `dsh-settings`、`@types/mozilla__readability`（readability 自带类型）、`react-dom` 及两个空挂的 devDependencies
-- 工具链升级：TypeScript `^5.8` → `^6.0.3`、tsdown `^0.22` → `^0.23.2`、vitest `^4.1` → `^5.0.5`
-- 删除 `pnpm-workspace.yaml` 中锁在 0.1.2 世代的 `overrides`，它们让依赖树里同时存在两份 schemastery 并触发 `TS2742`
-
-### 4. 修复 CI 中的脆弱网络测试
-
-`tests/moli-resolve.spec.ts` 有一个真实访问 GitHub API 的用例，却沿用 vitest 默认的 5s 超时，本机实测 6 次有 4 次失败（`fetch failed after 5036ms`）。已为其设置 30s 预算，连跑 5 次全绿。
-
-## 三项有意不升级的依赖
-
-| 包 | latest | 保持 | 原因 |
-| --- | --- | --- | --- |
-| `react` | 19.3.1 | **18.x** | 宿主 `apps/web` 用 `^18.2.0`，模块表分发的也是 18.3.1。升 19 会并存两份 React，拆散 hook 与 element identity |
-| `@mdream/js` | 2.0.3 | **1.x** | 2.x 丢弃 `data:` URI 图片源，插件的 base64 占位符失效，图片退化成 `![]()`，丢失 MIME 与尺寸线索（实测：1.7.2 → `![shot](data:image/png;base64,...3.0KB)`，2.0.3 → `![shot]()`） |
-| `@types/node` | 26.x | **24.x** | 与 Node 运行时主版本对齐，跨大版本会引入无关类型噪声 |
-
-## 兼容性
-
-- **要求 DSH `>=0.1.7-alpha.1`**，不再支持更早版本（那套设置 API 已被上游删除，无法同时兼容）
-- Node `>=22`
-- 本版本在 DSH `0.2.1-rc.3` 上完整验证
+---
 
 ## 验证
-
-`tsc --noEmit` 通过 · `vitest` **171 passed / 13 files** · `pnpm run build` 成功 · 真实 Loader 端到端确认 fiber ACTIVE、字段为 volatile 引用、配置编辑在下一次抓取生效且不重挂插件、设置域会为该条目投放表单。
-
-**完整变更见 [CHANGELOG.md](https://github.com/GreyRaphael/dsh-web-fetch-moli/blob/main/CHANGELOG.md)。**
+- `pnpm typecheck` & `pnpm build` 通过
+- `vitest` **237 项测试全绿通过**
+- CI 包打包与模块表依赖闭合校验全通过

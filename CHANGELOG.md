@@ -5,6 +5,52 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-11-02
+
+### Fixed
+
+- **`cordis.patch.yml` 丢弃 base bundle 的 `searchProvider`，导致标准 profile 上 `web_search` 整体不可用（P0）**: DSH 的 patch 语义是**整体替换**目标行的 `config`（`vendor/include/src/index.ts` 对 `Object.entries(overrides)` 逐 key 赋值；base bundle 自己的注释也写明 "A patch replaces the targeted row's whole `config` rather than merging into it"）。本插件只写了 `config: {fetchProvider: moli}`，于是 base 层在 `web` 行上的 `searchProvider: deepseek-official` 被一并丢弃。base 同时注册了 `deepseek-official`（`web-search-deepseek`）与 `deepseek-search-api`（`web-deepseek-api`）两个可用 search provider，seam 在未显式指定时对「多个可用」直接抛 `WEB_PROVIDER_AMBIGUOUS`，因此全新 profile 上每次 `web_search` 都失败。修复：在 `web` 行显式写回 `searchProvider`，并在文件头注释中记录「覆盖行必须重述 base 的所有 key」这一约束。
+- **深层嵌套与超宽 DOM 阻塞宿主事件循环的 Readability DoS 防护（P0）**: `src/markdown.ts` 的 `LinkeDOM + Readability + mdream` 管线完全同步无 `await` 点，而 Readability 的评分开销随 DOM 深度超线性增长（1024 层约 21.6KB 的文档耗时达 12.4s–45.7s）。新增基于显式栈 DFS 的 `clampDepth(doc, MAX_PIPELINE_DOM_DEPTH = 128)`（将超深子树折叠为其纯文本，保留正文且消除递归爆栈风险）与 `MAX_PIPELINE_DOM_NODES = 12_000` 元素预算上限（超预算时跳过 Readability 直接走清洗后容器/全文转换），并在降级时标记 `pipelineDegraded: true` → `result.truncated: true`。
+- **CDP 会话释放与标签页关闭有界超时兜底（P1）**: `src/provider.ts` 的 `releaseLeaseBounded` 为 `pool.release(lease)` 增加 1.5s `closeWithGrace` 超时守卫，防止远端 CDP 或本地守护进程在 `Target.closeTarget` 半挂死时拖满 60s RPC 超时阻塞并发槽位与插件卸载。
+- **`CdpConnectionPool` 终态 `disposed` 守卫（P1）**: `src/cdp-pool.ts` 在 `acquire`/`release`/`close` 入口及 `connectFresh` 拨号返回后检查终态 `this.disposed`，防止插件卸载期间的在途重连复活新连接或泄漏孤儿标签页。
+- **放行 `application/xml` 与 `*+json` / `*+xml` 结构化内容类型（P1）**: `src/provider.ts` 的 `classifyContentType` 补齐 `application/xml`（RFC 7303）、`application/*+json`（如 `application/ld+json`、`application/problem+json`）及 `*+xml`（如 `application/atom+xml`、`application/rss+xml`、`image/svg+xml`），与 `@deepseek-ai/dsh-web-fetch-http` 保持一致。
+- **保留文章内 `<header>`/`<footer>` 结构并按最大文本量选取回退容器（P1）**: `src/markdown.ts` 的 `stripChrome` 仅移除不属于内容容器（`main, article, .markdown-body` 等）后代的页面级 `header, footer`，保留 `<article><header><h1>` 中的真实文章标题与作者署名；Readability 未命中时的回退容器改为通过 `largestByText` 选取文本量最大的候选节点，避免被页面顶部的促销徽章 `<article>` 截胡。
+- **消除讨论 Cloudflare 的技术文章误触发 Challenge 判定及双探针分裂（P1）**: `src/challenge.ts` 将 `window._cf_chl_opt` 与 `"checking your browser before accessing"` 从单点子串匹配拆分为需同时命中的弱信号计数（`WEAK_CHALLENGE_SIGNAL_COUNT = 2`），并在 `classifyChallengeHtml`、`CHALLENGE_DOM_VERDICT_PROBE` 与 `CHALLENGE_DOM_PROBE` 扫描结构标记与弱信号前统一通过 `stripCodeSamples` 剥离 `<code>`/`<pre>` 代码块，同时补齐 `[name="cf-challenge"]` 选择器，确保三套入口在所有文档形态下结论完全一致。
+- **`web_fetch` 工具超时预算余量与卸载恢复（P2）**: `src/index.ts` 为 `tool.timeoutMs` 注入 `TOOL_BUDGET_HEADROOM_MS = 5_000` 余量，确保插件自身的 `WEB_FETCH_TIMEOUT` 先于上层 `TOOL_TIMEOUT` 触发；同时记录每次修改前的原始 `tool.timeoutMs` 并在插件卸载时完整恢复。
+- **配置数值归一化与 Markdown 细节修复（P2）**:
+  - `src/config.ts` 新增 `finiteNumber()`，在直挂模式下兜底过滤 `NaN`/`Infinity` 及越界值；
+  - `src/markdown.ts` 的 `collapseProseBlankLines` 状态机在折叠正文连续空行时完整保留围栏代码块（`` ``` `` / `~~~`）内部的空行；
+  - `src/markdown.ts` 的 `elideDataUris` / `dataUriPlaceholder` 支持大小写 `Data:`、带前导换行的属性值（自动 `trim()` 防止破坏 Markdown 链接语法）以及 `href`/`srcset`/`poster`/`data-src` 等懒加载属性。
+- **全面对齐 `dsh-v0.2.1-rc.3+` 宿主与浏览器客户端契约**:
+  - `package.json`：将 `engines.dsh` 移至宿主 `DshManifest` 实际读取的顶层 `engines.dsh: ">=0.2.1-rc.3 <0.3.0"`（移除无效的 `dsh.engines`），`peerDependencies` 下限同步收紧至 `>=0.2.1-rc.3 <0.3.0`；
+  - `package.json` & `tsdown.config.ts`：遵循 `dsh-v0.2.1-rc.3+` 的 `PLATFORM_MODULES` 隐式基线规范，移除 `dsh.client.external` 中冗余声明的 `@deepseek-ai/dsh-client-store` 与 `@deepseek-ai/dsh-client-ui-primitives`，并在 `dsh.client.inject` 补齐 `@deepseek-ai/dsh-client-ui-plugin-manager`；
+  - `src/client/controller.ts`：移除未使用的 `createSnapshotStore` 值导入，消除 `lib/client.js` 中多余的运行时 `require("@deepseek-ai/dsh-client-store")`；
+  - `tsconfig.json`：移除过时的 `paths.cordis` 别名，全面直接使用 `@deepseek-ai/cordis`；
+  - `src/client/{controller.ts,card.tsx,locales.ts}`：在 Web UI 设置卡片中补齐 `ignoreCertificateErrors` 开关（默认 `false`）与中英文文案，并新增 `tests/client-fields.spec.ts` 字段词典对齐断言。
+- **`SECURITY.md` 与 `README.md` / `README.zh-CN.md` 准确性修正**:
+  - `SECURITY.md` 改写为诚实的能力边界（插件被动监听网络事件以判断页面稳定，不拦截页面子资源；分列页面内容不外发与 GitHub Release 检查/下载出网行为）；
+  - `README` 手动安装命令补充 `--strip-components=1`，修正二进制探测顺序说明（`moliPath` → `MOLI_PATH` → `~/.cache/moli` → `$PATH`），补充带测量条件的 `VmHWM` 实测内存表，标注 npm 待发布状态；
+  - `package.json` 的 `disclosure` 字段按实际网络、文件系统与子进程行为补全。
+- **CI 打包校验与 Release 工作流加固**:
+  - `.github/workflows/ci.yml` 的 `Verify package contents` 显式指定 `shell: bash`（兼容 Windows runner），通过 Node 脚本校验 tarball 必备文件、`node --check` 语法检查、`__ModuleLoader__.load` 注册、`PLATFORM_MODULES` / `dsh.client.external` 依赖闭合、顶层 `engines.dsh` 声明以及 `.d.ts` 零裸 `cordis` 导入；
+  - `.github/workflows/release.yml` 增加 `CHANGELOG.md` 与 `.github/release-notes.md` 版本标题校验。
+
+### Added
+
+- `README` 新增「Measured footprint / 实测内存占用」小节，记录峰值内存的测量条件与三个场景的实测值，并说明进程高水位不回落的含义。
+- Host `Config`、Web 客户端配置卡片与 README 配置表同步新增 `ignoreCertificateErrors`（默认 `false`，共 12 个可热更新 volatile 字段）。
+
+### Security
+
+- **自动下载的 Moli 二进制改为按 release digest 校验（`src/moli-resolve.ts`）**: 原实现的 `verifyArchiveChecksumIfPublished` 去找 `<asset>.sha256` 伴生文件，而上游从未发布该文件（实测 `404` / 正文 `Not Found`），于是唯一的执行分支永远是「找不到 → 静默放行」——解包、`chmod 0755`、执行业务全程没有任何完整性校验，HTTPS 是唯一控制。现改为读取 GitHub Release API 已经提供的按资产 `digest`（`assets[].digest`，实测当前 release 的 8 个资产全部带 `sha256:` 摘要）：
+  - 新增 `fetchLatestMoliReleaseAssetDigests()`（curl 优先、`fetch` 兜底，任何失败都返回 `undefined` 而不阻断安装）；
+  - 新增 `verifyArchiveDigest()`，在**解包前**校验；摘要不匹配直接抛错中止安装，`chmod` 永不执行；
+  - 摘要缺失（旧 release / 限流 / 离线首装）或格式无法识别时，打印一条具名的 `integrity NOT verified` 警告后再继续——不再静默；
+  - 新增 `setReleaseDigestSourceForTests()` 注入点，并补 5 条测试（匹配、不匹配、摘要缺失、元数据不可达、格式异常）。
+  - 端到端复核：真实下载 `moli-x86_64-unknown-linux-gnu.tar.gz` 的 sha256 为 `2cd043267c193d695cd926342388dc83b10b04fc11fa44655b666041f27c5535`，与 API digest 逐字符一致。
+  - 仍然存在的缺口：**签名未验证**。digest 与资产同源，可防传输损坏与「换了资产没换元数据」，但防不住上游仓库本身被攻陷。
+- `SECURITY.md` 的威胁模型已按上述实现改写（含 `ignoreCertificateErrors` 默认关闭、开启后页面内容不再经过传输层认证）。
+
 ## [0.7.0] - 2026-10-26
 
 ### Fixed
@@ -28,7 +74,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **依赖清单精简（声明项 29 → 23，净删 6 项）**:
+- **依赖清单精简（声明项 29 → 23，净删 6 项；此处为 `0846eea` 时的中间状态，HEAD 实际为 24 项）**:
   - 删除 `@deepseek-ai/dsh-settings` 的 dev 声明——迁移后运行时与类型层都不再引用它。
   - 删除 `@types/mozilla__readability`：`@mozilla/readability` 自 0.6.0 起自带 `index.d.ts`，这份 `@types` 是它的过时影子包，删掉后 `tsc --noEmit` 仍然通过。
   - 删除 `react-dom` 与 `@types/react-dom`：本插件从不 import `react-dom`（`lib/client.js` 唯一的外部依赖是 `react/jsx-runtime`，由宿主模块表提供）；同时从 `tsconfig.json` 的 `types` 里移除 `react-dom`。
@@ -53,7 +99,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`@types/node` 停留在 24.x**: 与 Node 运行时主版本对齐，跨大版本会引入无关类型噪声。
 
-- **客户端改用平台共享的 settings-form 套件，删除 935 行手工转写层**: `form.ts`(396) / `fields.tsx`(195) / `PluginCard.tsx`(71) 及两个 CSS(317) 全部删除，改为使用浏览器壳层已种入冻结模块表的 `@deepseek-ai/dsh-client-ui-primitives` 与 `dsh-client-store`。这些文件头部原本写明“external client bundles cannot value-import `@deepseek-ai/*` packages”——该限制来自插件自己的 purity gate，而 rc.3 的模块表已经开放这两个 specifier，于是限制的前提不再成立。
+- **客户端改用平台共享的 settings-form 套件，删除 979 行手工转写层**: `form.ts`(396) / `fields.tsx`(195) / `PluginCard.tsx`(71) 及两个 CSS(240+77=317) 全部删除，改为使用浏览器壳层已种入冻结模块表的 `@deepseek-ai/dsh-client-ui-primitives` 与 `dsh-client-store`。这些文件头部原本写明“external client bundles cannot value-import `@deepseek-ai/*` packages”——该限制来自插件自己的 purity gate，而 rc.3 的模块表已经开放这两个 specifier，于是限制的前提不再成立。（该 commit 内 `src/client/` 净变化为 −1070 行：删除 1419、新增 349，含新增的 `fields.ts`(73) 与 `card.module.css`(111)。）
   - `form.ts` 的 `CardForm` → 平台 `SettingsFormModel`；`ValueField` → `SettingsValueField`；`CheckboxField` → `Checkbox`；`PluginCard` → `SettingsForm`。
   - 插件自己只剩两处平台未覆盖的形状：backend 单选组（它的两个选项要联动禁用其它字段）、以及复选框旁的“已覆盖 + 恢复默认”徽章。二者落在 `card.module.css`（111 行，原为 317 行）。
   - `controller.ts` 从 103 行降至 116 行且不再包含任何模型逻辑，只声明字段与投影；新 `fields.ts`(73 行) 承载三个 spec 工厂（boolean / 有界整数 / 选项集），并且只用 `import type`，因此在 Node 下可直接测试。
