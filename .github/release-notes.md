@@ -1,29 +1,27 @@
-## [0.8.0]
+## [0.9.0]
 
 ## 主要更新
 
-### 1. 全面对齐 DeepSeek Harness `dsh-v0.2.1-rc.3+` 平台契约
-- **引擎与依赖范围收紧**：`package.json` 将 `engines.dsh` 移至顶层宿主读取路径，明确限定为 `">=0.2.1-rc.3 <0.3.0"`；`peerDependencies`（`@deepseek-ai/dsh-tools`、`@deepseek-ai/dsh-web`）同步收紧为 `">=0.2.1-rc.3 <0.3.0"`。
-- **客户端基线模块解耦**：遵循 DSH `rc.3+` 隐式 `PLATFORM_MODULES` 规范，移除 `dsh.client.external` 中的平台基线包声明；在 `dsh.client.inject` 补齐 `@deepseek-ai/dsh-client-ui-plugin-manager`。
-- **构建精简与类型安全**：消除 `createSnapshotStore` 死值导入与 `paths.cordis` 别名，产物直接使用规范 `@deepseek-ai/cordis`。
+### 1. 全面面向 DeepSeek Harness `>= v0.2.2-rc.5`（不保留旧版本兼容）
+- **版本与依赖升级**：`engines.dsh`、`peerDependencies` 与 `devDependencies` 全面升级至 `0.2.2-rc.5`，`@deepseek-ai/cordis` 升级至 `>=4.1.0 <5`，`@deepseek-ai/schemastery` 升级至 `>=3.19.0 <4`。
+- **修正 `cordis.patch.yml` 适配新版路由与 Preset 架构**：移除硬编码的 `searchProvider: deepseek-official`、宿主平面 `tool-web` 覆盖及与默认值冲突的 `timeoutMs: 60000`，完整保留 `dsh v0.2.2-rc.5` 按 LLM 路由自动选择搜索后端机制，避免向 `minimal` preset 泄漏 `tool-web`。
+- **补齐设置页 Provider 元数据**：`MoliFetchProvider` 实现 `WebFetchProvider` 新增的 `title`（`Moli`）与中英文 `description`，在 Web 设置页的 Fetch 选择器中完整展示。
+- **客户端类型契约清理**：`src/client/card.tsx` 改用 `@deepseek-ai/dsh-client-ui-plugin-manager/client` 官方 `'plugins.bundle.config'` `SlotMap` 声明，移除手写 `declare module` 补丁；`src/index.ts` 动态工具超时预算支持随配置双向升降。
 
-### 2. 宿主核心稳定性与 DoS 防护
-- **修复 patch 覆盖 searchProvider 缺陷（P0）**：在 `cordis.patch.yml` 的 `web` 行显式声明 `searchProvider: deepseek-official`，解决 DSH 全行覆盖机制导致的 `WEB_PROVIDER_AMBIGUOUS`。
-- **DOM 深度与节点预算保护（P0）**：在 Readability 评分前执行显式栈 DFS `clampDepth`（深度上限 128）与 12,000 节点预算截断，彻底消除深层/超宽 DOM 导致的同步阻塞 DoS（1024 层 DOM 耗时由 ~45s 降至 ~200ms）。
-- **CDP 租约关闭与连接池生命周期保护（P1）**：标签页释放增加 1.5s 超时兜底，防止 CDP 连接挂死；`CdpConnectionPool` 增加终态 `disposed` 守卫，杜绝卸载期连接复活。
-- **内容类型扩充**：支持 `application/xml`、`*+json` 与 `*+xml` 等结构化文档放行。
+### 2. 抓取管线延迟大幅优化与关键缺陷修复
+- **修复短静态页 / 小型 SPA 25 秒假死（P0）**：`settleDynamicSpa` 新增 `readyState === 'complete'` + 无活跃 spinner + DOM 静默窗口提前收敛，同时修复 `cards >= 5` 误命中加载骨架屏及骨架替换计数回落（如 `170 → 130`）漏检问题：
+  - 短静态页抓取延迟：`25,000ms+` → **`365ms`**（**-98.5%**）
+  - 小型 SPA 页面延迟：`25,000ms+` → **`1,259ms`**（**-95.0%**）
+- **消除高频 `outerHTML.length` 全量 DOM 序列化**：移除滚动等待中每 25ms 触发一次的 `document.documentElement.outerHTML.length` 全量序列化，改为轻量节点/文本计数与 `MutationObserver` 合并节流；小型静态页自动跳过无意义的滚动与截图步骤。
+- **Markdown 去噪单遍显式栈 DFS**：`src/markdown.ts` 将原先 13 次全树 `querySelectorAll` / 遍历合并为单遍 `prepareDomTree`，并在进入 `<script>`/`<style>`/`<svg>`/`<nav>`/`<aside>` 及非内容容器 `<header>`/`<footer>` 前直接剪枝。
 
-### 3. Cloudflare 人机验证探针与降噪优化
-- **双探针一致性与防误报（P1）**：代码块剥离提前至结构标记扫描之前，消除技术文章中引用 Cloudflare 路径导致的误判；补齐 `[name="cf-challenge"]` 选择器，确保三套检测入口结论严格一致。
-- **降噪保真度提升**：保留文章容器内的 `<header>`/`<footer>` 结构（标题与作者信息），回退容器按最大文本量选取；状态机保留代码块内部空行；修复包含前导换行的 Data-URI 解析。
-
-### 4. 供应链安全与 Web 设置面板完善
-- **二进制 SHA-256 校验**：改用 GitHub Release API `assets[].digest` 进行解包前完整性校验，不可达时发出显式未验证告警。
-- **配置项补齐**：Web UI 设置卡片与宿主同步新增 `ignoreCertificateErrors` 开关，词典补齐中英文多语言文案，全面清理历史残留数据。
+### 3. CDP 客户端与本地 Moli 守护进程零阻塞优化
+- **CDP 管道与 `networkidle` 竞态修复**：`NativeCdpPage.init()` 并行发送 `Page.getFrameTree` 与 3 个 domain `enable`（每页减少 1 次 RTT）；`send()` 支持单命令 `timeoutMs`（不再被硬编码 60s 误杀长超时导航）；修复 `waitForLoadState('networkidle', { timeout: 500 })` 必超时竞态，网络已静默时 0ms 立即返回。
+- **本地进程探活缓存与后台非阻塞更新**：`MoliProcessManager.ensure()` 增加 10s 健康状态 TTL 缓存，跳过并发抓取的重复 `/json/version` 探活；`resolveMoliBinary()` 在本地缓存二进制已存在时立即返回并后台异步检查更新，消除 24h TTL 过期时的首次抓取阻塞。
 
 ---
 
-## 验证
-- `pnpm typecheck` & `pnpm build` 通过
-- `vitest` **237 项测试全绿通过**
-- CI 包打包与模块表依赖闭合校验全通过
+## 实测与验证（配合 Moli `v1.1.10`）
+- `pnpm typecheck` & `pnpm build` 通过（含客户端纯净性门禁与 tarball 打包校验）
+- `vitest` **14 个测试文件、243 项测试全部通过**（6 并发本地页集成测试含守护进程启动仅 **`581ms`**）
+- 阿里云百炼模型广场端到端实测（`RUN_ONLINE_BENCHMARK=true` + 连续复测）：**4/4 稳定提取 129/129 模型卡片**（约 `11.0s ~ 12.3s`，含完整 SPA 渲染、9 轮滚动与 1.54MB HTML → 44KB Markdown 去噪）

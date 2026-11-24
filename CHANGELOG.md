@@ -5,6 +5,33 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-11-24
+
+### Breaking Changes
+
+- **仅面向 DeepSeek Harness `>= 0.2.2-rc.5`（移除旧版本兼容）**:
+  - `package.json`：`engines.dsh`、`peerDependencies`（`@deepseek-ai/dsh-tools`、`@deepseek-ai/dsh-web`）与 `devDependencies` 全面升级至 `0.2.2-rc.5`，`@deepseek-ai/cordis` 升级至 `>=4.1.0 <5`（dev `4.1.0`），`@deepseek-ai/schemastery` 升级至 `>=3.19.0 <4`（`3.19.0`）。
+  - `cordis.patch.yml`：移除硬编码的 `searchProvider: deepseek-official`、宿主平面 `tool-web` 覆盖与静态 `timeoutMs: 60000`，完整保留 `dsh v0.2.2-rc.5` 的按 LLM 路由自动选择搜索后端机制与 preset 隔离架构（不再向 `minimal` preset 泄漏 `tool-web`）。
+  - `src/client/card.tsx`：改为直接类型引入 `@deepseek-ai/dsh-client-ui-plugin-manager/client` 官方 `'plugins.bundle.config'` `SlotMap` 声明，移除本地手写 `declare module` 兼容补丁。
+  - `src/moli-resolve.ts`：移除旧版纯文本 `.plugin-version` 兼容分支，统一使用 JSON 格式检查时间戳。
+
+### Added
+
+- **Web 设置页 Provider 元数据（`dsh >= 0.2.2-rc.5`）**：`MoliFetchProvider` 实现新版 `WebFetchProvider` 的 `title: 'Moli'` 与中英文 `description`，支持在 `ctx.web.listProviders()` 与设置页 Fetch 菜单中完整展示。
+
+### Fixed
+
+- **修复短静态页与小型 SPA 25 秒假死缺陷（P0）**：`src/provider.ts` 的 `settleDynamicSpa` 在页面无 spinner 但正文不足 300/600 字时原先恒返回 `false`，导致短页面空等完整 `25s` 安全定时器。现引入 `readyState === 'complete'` + 无活跃 spinner + DOM 静默窗口提前收敛（短静态页实测由 `25s+` 降至 **`365ms`**，小型 SPA 降至 **`1.26s`**），并修复 `cards >= 5` 误命中加载骨架屏及骨架替换导致卡片计数回落（如 `170 → 130`）时 `waitForSentinelBatch` 漏检的问题。
+- **修复 `networkidle` 500ms vs 500ms 必超时竞态**：`src/cdp-client.ts` 将 `networkidle` 静默窗口按调用超时自适应缩放并追踪 `lastNetworkActivityAt`，在网络已静默时 0ms 立即返回。
+- **修复动态调低 `timeoutMs` 不生效的问题**：`src/index.ts` 的 `tools/execute` 预算同步改为按 `max(original, budget)` 双向跟踪实时配置，调低超时后立即生效而非停留在历史高值。
+
+### Performance
+
+- **消除高频 `outerHTML.length` 全量 DOM 序列化**：`src/hooks.ts`（`scrollIntoViewNative`）与 `src/provider.ts`（`waitForSentinelBatch`）移除每 25ms 执行一次的 `document.documentElement.outerHTML.length` 全量序列化，改为按需轻量节点/文本计数与 `MutationObserver` 节流合并；小型静态页（无 sentinel/grid/卡片且节点数 `< 40`）直接跳过 `runSentinelRounds`。
+- **Markdown 去噪管线合并为单遍显式栈 DFS**：`src/markdown.ts` 将原先 13 次独立 `querySelectorAll` / 遍历（`stripChrome`、`elideDataUris`、`resolveRelativeUrls`、`clampDepth` 与节点/卡片/图片计数）合并为单遍 `prepareDomTree`，并在进入 `<script>`/`<style>`/`<svg>`/`<nav>`/`<aside>` 与非内容容器级 `<header>`/`<footer>` 子树前直接剪枝。
+- **CDP 管道并行化与单命令超时解耦**：`NativeCdpPage.init()` 将 `Page.getFrameTree` 与 3 个 domain `enable` 并行发送（每页减少 1 次 RTT）；`NativeCdpBrowser.send()` 支持单命令 `timeoutMs`（`Page.navigate` 遵循调用预算，`Target.closeTarget` 收敛至 2s，心跳探针收敛至 15s）。
+- **本地守护进程与二进制解析零阻塞**：`MoliProcessManager.ensure()` 增加 10s 健康状态 TTL 缓存，跳过并发抓取的重复 `/json/version` HTTP 探活；`resolveMoliBinary()` 在 `~/.cache/moli/moli` 已存在时立即返回并后台异步触发 `syncLatestMoliBinary()`，消除 24h TTL 过期或升级后的首次抓取阻塞。
+
 ## [0.8.0] - 2026-11-02
 
 ### Fixed
