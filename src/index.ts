@@ -141,9 +141,11 @@ export function apply(ctx: Context, config: Config = {}): void {
         const tool = toolsCtx.tools.get('web_fetch', exec.agent)
         if (tool !== undefined) {
           const budget = effectiveTimeoutMs(current()) + TOOL_BUDGET_HEADROOM_MS
-          if (typeof tool.timeoutMs !== 'number' || tool.timeoutMs < budget) {
+          const base = originalTimeouts.has(tool) ? originalTimeouts.get(tool) : tool.timeoutMs
+          const desired = typeof base === 'number' ? Math.max(base, budget) : budget
+          if (tool.timeoutMs !== desired) {
             if (!originalTimeouts.has(tool)) originalTimeouts.set(tool, tool.timeoutMs)
-            tool.timeoutMs = budget
+            tool.timeoutMs = desired
           }
         }
       }

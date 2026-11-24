@@ -53,7 +53,7 @@ dynamic script loading, and materializes layout via Micro-Clip screenshots so `I
 
 ## Requirements
 
-- DeepSeek Harness (`dsh web`) ≥ `0.2.1-rc.3`, Node.js ≥ 22 (the plugin drives CDP over the native global `WebSocket`, which Node 20 does not provide).
+- DeepSeek Harness (`dsh web`) ≥ `0.2.2-rc.5`, Node.js ≥ 22 (the plugin drives CDP over the native global `WebSocket`, which Node 20 does not provide).
 - **Zero manual setup**: the plugin features **automatic download on first use**. If no `moli` binary is detected, it downloads and unpacks the latest release binary matching your OS and architecture (Linux, macOS, Windows x86_64 / arm64) into `~/.cache/moli`.
 - Existing installations are detected in this order: the `moliPath` setting → the `MOLI_PATH` environment variable → `~/.cache/moli/moli` → `moli` on `$PATH`. There is **no scan of `~/.local/bin`**; if you install Moli there, either put it on `$PATH` or set `moliPath`.
 

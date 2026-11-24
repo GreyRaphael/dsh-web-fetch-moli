@@ -17,7 +17,7 @@ import { transform } from 'lightningcss'
 
 /**
  * Baseline modules the browser shell (`@deepseek-ai/dsh-client-web` in
- * `dsh-v0.2.1-rc.3+`) seeds unconditionally into its frozen module table.
+ * `dsh-v0.2.2-rc.5+`) seeds unconditionally into its frozen module table.
  *
  * Because they belong to the implicit `PLATFORM_MODULES` baseline, the bundle
  * resolves them through the loader's `require` without needing a

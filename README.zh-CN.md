@@ -45,7 +45,7 @@ Moli 是单个 Rust 进程（没有独立的浏览器进程 + 驱动 + 渲染进
 
 ## 环境依赖
 
-- DeepSeek Harness (`dsh web`) ≥ `0.2.1-rc.3`，Node.js ≥ 22（插件通过原生全局 `WebSocket` 驱动 CDP，Node 20 不提供该 API）。
+- DeepSeek Harness (`dsh web`) ≥ `0.2.2-rc.5`，Node.js ≥ 22（插件通过原生全局 `WebSocket` 驱动 CDP，Node 20 不提供该 API）。
 - **免手动安装**：插件内置**首次使用自动下载安装**能力。若检测到系统中未安装 Moli，会自动下载适配当前操作系统与 CPU 架构（Linux、macOS、Windows x86_64 / arm64）的最新版二进制并解包到 `~/.cache/moli`，开箱即用。
 - 已有安装的探测顺序为：`moliPath` 配置项 → `MOLI_PATH` 环境变量 → `~/.cache/moli/moli` → `$PATH` 上的 `moli`。**不会扫描 `~/.local/bin`**；你若装在那里，请把它加入 `$PATH`，或直接设置 `moliPath`。
 

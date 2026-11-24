@@ -16,23 +16,16 @@
 import {
   Checkbox, SettingsForm, SettingsValueField,
 } from '@deepseek-ai/dsh-client-ui-primitives'
+// Type-only: pulls the official 'plugins.bundle.config' SlotMap augmentation from dsh >= 0.2.2-rc.5.
+import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { MoliCardFace } from './controller.ts'
 import css from './card.module.css'
-
-declare module '@deepseek-ai/dsh-client-ui-slots' {
-  interface SlotMap {
-    'plugins.bundle.config': { kind: 'keyed'; scope: 'root'; owner: { readonly view: 'summary' | 'page' } }
-  }
-}
 
 export type MoliCardProps =
   PropsRuntime<'plugins.bundle.config'>
   & PropsLocale<'web-fetch-moli'>
   & InjectFace<MoliCardFace>
-  & {
-    view?: 'summary' | 'page'
-  }
 
 /** Fields the shared control should mark for a numeric keypad. */
 const NUMERIC: ReadonlySet<string> = new Set(['timeoutMs', 'maxConcurrency', 'challengeWaitMs', 'challengeRetries'])
