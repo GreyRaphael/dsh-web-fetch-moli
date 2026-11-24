@@ -109,136 +109,181 @@ function dataUriPlaceholder(src: string): string {
  * `data-*` mirrors are covered because image pipelines move the payload there
  * before the browser ever sets `src`.
  */
-const DATA_URI_ATTRIBUTES = ['src', 'href', 'poster', 'srcset', 'data-src', 'data-original', 'data-lazy-src'] as const
+const DATA_URI_ATTRIBUTES = new Set([
+  'src',
+  'href',
+  'poster',
+  'srcset',
+  'data-src',
+  'data-original',
+  'data-lazy-src',
+])
+
+const CARD_CLASS_RE = /card|item|model/
+const AD_CLASS_RE = /(?:^|\s)ad(?:\s|$)/
+const CONTENT_CLASS_RE = /(?:^|\s)(?:markdown-body|docs-content)(?:\s|$)|article-content|doc-content/i
 
 /**
- * Elide inline payloads in every attribute that can reach the Markdown.
- *
- * A mixed `srcset` (prose candidates plus one inlined one) is deliberately
- * left alone: splitting it safely needs a real srcset parser (a `data:` URI may
- * legally contain commas), and the realistic inlining case emits a single
- * `data:` candidate, which this covers.
- * @param document - the parsed page.
+ * Tag names that are never content, wherever they sit in the tree: scripts,
+ * styles, replaced controls, embeds, script-only fallbacks, and chrome containers.
  */
-function elideDataUris(document: Document): void {
-  for (const attribute of DATA_URI_ATTRIBUTES) {
-    // `srcset` lives on img/source, `href` on a/link, `poster` on video — the
-    // wildcard attribute selector keeps one pass per attribute instead of
-    // enumerating element names, which would miss custom lazy-load hosts.
-    for (const element of Array.from(document.querySelectorAll(`[${attribute}]`))) {
-      const value = element.getAttribute(attribute)
-      if (value === null || !isDataUri(value)) continue
-      element.setAttribute(attribute, dataUriPlaceholder(value))
-    }
-  }
-}
-
-/**
- * Resolve relative links and image sources against baseUrl.
- *
- * `data:` is recognized through {@link isDataUri} so a scheme-cased or padded
- * inline URI is not handed to `new URL()`, which would re-serialize it and undo
- * the elision the caller just applied.
- */
-function resolveRelativeUrls(document: Document, baseUrl: string): void {
-  if (!baseUrl) return
-  for (const a of Array.from(document.querySelectorAll('a'))) {
-    const href = a.getAttribute('href')
-    if (href && !isDataUri(href) && !href.startsWith('http://') && !href.startsWith('https://') && !href.startsWith('mailto:') && !href.startsWith('#')) {
-      try { a.setAttribute('href', new URL(href, baseUrl).href) } catch {}
-    }
-  }
-  for (const img of Array.from(document.querySelectorAll('img'))) {
-    const src = img.getAttribute('src')
-    if (src && !isDataUri(src) && !src.startsWith('http://') && !src.startsWith('https://')) {
-      try { img.setAttribute('src', new URL(src, baseUrl).href) } catch {}
-    }
-  }
-}
-
-/**
- * Noise that is never content, wherever it sits in the tree: replaced controls,
- * embeds, script-only fallbacks, and ad/sidebar containers. Removed
- * document-wide, because an ad `<input>` or an `<aside>` inside an article is
- * still an ad or an aside.
- */
-const ALWAYS_FORBID_SELECTOR = 'nav, aside, svg, iframe, noscript, button, select, input, textarea, dialog, canvas, video, audio, template, .ad, #ad, [class*="banner-ad"], [id*="sidebar"]'
-
-/**
- * Tags that are site chrome on the page but article structure inside a content
- * container.
- *
- * `<article><header><h1>Title</h1><p>By Alice</p></header>` is the canonical
- * WordPress/Medium/Hugo post layout, and the same holds for the source or
- * footnote `<footer>` a docs theme puts at the end of a post body. Removing
- * these document-wide (the earlier behavior) deleted the article's own heading
- * and byline, and the extractor then substituted the site `<title>` — so the
- * model saw `# Site — Blog` instead of the post title.
- */
-const PAGE_CHROME_SELECTOR = 'header, footer'
+const ALWAYS_FORBID_TAGS = new Set([
+  'SCRIPT',
+  'STYLE',
+  'NAV',
+  'ASIDE',
+  'SVG',
+  'IFRAME',
+  'NOSCRIPT',
+  'BUTTON',
+  'SELECT',
+  'INPUT',
+  'TEXTAREA',
+  'DIALOG',
+  'CANVAS',
+  'VIDEO',
+  'AUDIO',
+  'TEMPLATE',
+])
 
 /** Containers whose contents are the page's subject rather than its chrome. */
 const CONTENT_CONTAINER_SELECTOR = 'main, [role="main"], article, .markdown-body, .docs-content, [class*="article-content" i], [class*="doc-content" i]'
 
-/**
- * Remove layout chrome and interactive noise.
- *
- * Page chrome is removed only where it is NOT inside a content container, so a
- * masthead `<header>` (a sibling of `<main>`) goes while an article's title
- * block stays. `closest()` is the membership test: it returns the element
- * itself for a container tag, and null for a node that has no container
- * ancestor at all — a page with no `<main>`/`<article>` keeps the earlier
- * document-wide behavior, since nothing there is identifiable as content.
- * @param document - the parsed page, mutated in place.
- */
-function stripChrome(document: Document): void {
-  for (const element of Array.from(document.querySelectorAll(ALWAYS_FORBID_SELECTOR))) {
-    element.remove()
-  }
-  for (const element of Array.from(document.querySelectorAll(PAGE_CHROME_SELECTOR))) {
-    if (element.closest(CONTENT_CONTAINER_SELECTOR) === null) element.remove()
-  }
+interface DomPrepStats {
+  prunedSubtrees: number
+  elementCount: number
+  cardLikeCount: number
+  hasImg: boolean
 }
 
 /**
- * Collapse subtrees that nest past `maxDepth` into their own text.
- *
- * Readability's scoring is superlinear in nesting depth and entirely
- * synchronous, so one deep page monopolizes the host event loop: the same 21.6KB
- * document costs 0.47s at 256 deep, 2.0s at 512, and 12.4s at 1024 (measured
- * here; linkedom parsing is 11ms and conversion <1ms of that). Rejecting the
- * page would be simpler but throws away real content, so the tree is flattened
- * instead: at the ceiling each node's `textContent` replaces its children,
- * which keeps the words and removes the depth that made scoring expensive.
- * Measured on a 1024-deep document this cuts 1029 elements to 130 and scoring
- * from 12.4s to 193ms; a 20-deep page is untouched (0 nodes pruned).
- *
- * The walk is an explicit-stack DFS rather than recursion: the documents this
- * exists for are exactly the ones that would overflow the JS call stack.
- * @param document - the parsed page, mutated in place.
- * @param maxDepth - deepest allowed ancestor chain, counting the root as 1.
- * @returns the number of subtrees that were collapsed.
+ * Single explicit-stack DFS over the parsed DOM tree that performs all
+ * preprocessing in one traversal without `css-select` full-tree rescans:
+ * 1. Strips always-forbidden tags (`<script>`, `<style>`, `<svg>`, `<nav>`,
+ *    `<aside>`, form controls, ad/sidebar blocks) before recursing into them;
+ * 2. Strips page-level `<header>` / `<footer>` outside content containers
+ *    while preserving article-internal title/byline headers and footnotes;
+ * 3. Elides inline `data:` URIs across all payload-carrying attributes;
+ * 4. Resolves relative `<a href>` and `<img src>` URLs against `baseUrl`;
+ * 5. Clamps nesting depth past `maxDepth` to bound Readability's superlinear scoring;
+ * 6. Collects surviving element, card-like container, and image counts.
  */
-function clampDepth(document: Document, maxDepth: number): number {
+function prepareDomTree(document: Document, baseUrl: string, maxDepth: number): DomPrepStats {
   const root = document.documentElement ?? document.body
-  if (!root) return 0
-  let pruned = 0
-  const stack: Array<{ node: Element; depth: number }> = [{ node: root, depth: 1 }]
+  if (!root) {
+    return { prunedSubtrees: 0, elementCount: 0, cardLikeCount: 0, hasImg: false }
+  }
+
+  let prunedSubtrees = 0
+  let elementCount = 0
+  let cardLikeCount = 0
+  let hasImg = false
+
+  const stack: Array<{ node: Element; depth: number; inContent: boolean }> = [{ node: root, depth: 1, inContent: false }]
   while (stack.length > 0) {
-    const entry = stack.pop() as { node: Element; depth: number }
+    const entry = stack.pop() as { node: Element; depth: number; inContent: boolean }
+    const node = entry.node
+    const tag = node.tagName.toUpperCase()
+
+    // 1. Always-forbidden tag check before scanning attributes or children
+    if (ALWAYS_FORBID_TAGS.has(tag)) {
+      node.remove()
+      continue
+    }
+
+    let className = ''
+    let id = ''
+    let role = ''
+    const attrs = node.attributes
+    if (attrs && attrs.length > 0) {
+      for (let i = 0; i < attrs.length; i++) {
+        const attr = attrs[i]
+        if (!attr) continue
+        const attrName = attr.name.toLowerCase()
+        if (attrName === 'class') className = attr.value
+        else if (attrName === 'id') id = attr.value
+        else if (attrName === 'role') role = attr.value
+      }
+    }
+
+    // 2. Always-forbidden ad/sidebar containers
+    if (
+      (className !== '' && (AD_CLASS_RE.test(className) || className.includes('banner-ad')))
+      || (id !== '' && (id === 'ad' || id.includes('sidebar')))
+    ) {
+      node.remove()
+      continue
+    }
+
+    // 3. Content container membership (mirrors closest(CONTENT_CONTAINER_SELECTOR))
+    const inContent = entry.inContent
+      || tag === 'MAIN'
+      || tag === 'ARTICLE'
+      || role === 'main'
+      || (className !== '' && CONTENT_CLASS_RE.test(className))
+
+    // 4. Page chrome outside any content container
+    if (!inContent && (tag === 'HEADER' || tag === 'FOOTER')) {
+      node.remove()
+      continue
+    }
+
+    // Surviving element
+    elementCount++
+    if (tag === 'IMG') hasImg = true
+    if (className !== '' && CARD_CLASS_RE.test(className)) cardLikeCount++
+
+    // 5. Data-URI elision and relative URL resolution on surviving element
+    if (attrs && attrs.length > 0) {
+      for (let i = 0; i < attrs.length; i++) {
+        const attr = attrs[i]
+        if (!attr) continue
+        const attrName = attr.name.toLowerCase()
+        if (!DATA_URI_ATTRIBUTES.has(attrName)) continue
+        const value = attr.value
+        if (isDataUri(value)) {
+          node.setAttribute(attrName, dataUriPlaceholder(value))
+          continue
+        }
+        if (!baseUrl || !value) continue
+        if (
+          tag === 'A'
+          && attrName === 'href'
+          && !value.startsWith('http://')
+          && !value.startsWith('https://')
+          && !value.startsWith('mailto:')
+          && !value.startsWith('#')
+        ) {
+          try { node.setAttribute('href', new URL(value, baseUrl).href) } catch {}
+        } else if (
+          tag === 'IMG'
+          && attrName === 'src'
+          && !value.startsWith('http://')
+          && !value.startsWith('https://')
+        ) {
+          try { node.setAttribute('src', new URL(value, baseUrl).href) } catch {}
+        }
+      }
+    }
+
+    // 6. Depth clamp
     if (entry.depth >= maxDepth) {
-      if (entry.node.children.length > 0) {
+      if (node.children.length > 0) {
         // Assigning textContent drops every child and keeps the text, in one step.
-        entry.node.textContent = entry.node.textContent
-        pruned++
+        node.textContent = node.textContent
+        prunedSubtrees++
       }
       continue
     }
-    for (const child of Array.from(entry.node.children)) {
-      stack.push({ node: child, depth: entry.depth + 1 })
+
+    const children = node.children
+    for (let i = children.length - 1; i >= 0; i--) {
+      const child = children[i]
+      if (child) stack.push({ node: child, depth: entry.depth + 1, inContent })
     }
   }
-  return pruned
+
+  return { prunedSubtrees, elementCount, cardLikeCount, hasImg }
 }
 
 /**
@@ -320,43 +365,29 @@ export function htmlToMarkdown(html: string, url: string): DenoiseResult {
 
   const wrapped = /<html\b/i.test(html) ? html : `<html><body>${html}</body></html>`
   const { document } = parseHTML(wrapped)
-
-  // 1. Elide inline data-URI payloads early, before any step can copy them
-  elideDataUris(document as unknown as Document)
-
-  // 2. Resolve relative URLs
-  resolveRelativeUrls(document as unknown as Document, url)
-
-  // 3. Remove layout chrome and interactive noise, keeping article structure
-  stripChrome(document as unknown as Document)
+  const doc = document as unknown as Document
 
   let source: string | null = null
-  let title = (document as unknown as Document).title || ''
+  let title = doc.title || ''
   let mode: DenoiseMode = 'article'
   let pipelineDegraded = false
 
-  const doc = document as unknown as Document
-
-  // 3b. Bound the tree before the synchronous scoring phase sees it.
-  //
-  // Depth is clamped first (cheap, and it is the axis that makes scoring
-  // superlinear), then the element count decides whether scoring runs at all.
-  // Both are recorded as `pipelineDegraded`, because either one means the
-  // caller gets real content without the ad/nav stripping a normal run does.
-  const prunedSubtrees = clampDepth(doc, MAX_PIPELINE_DOM_DEPTH)
-  const elementCount = doc.querySelectorAll('*').length
+  // 1. Single-pass DOM preparation: strip chrome/scripts/styles, elide data-URIs,
+  //    resolve relative URLs, clamp nesting depth, and gather node/card/image counters.
+  const { prunedSubtrees, elementCount, cardLikeCount, hasImg } = prepareDomTree(doc, url, MAX_PIPELINE_DOM_DEPTH)
   if (prunedSubtrees > 0) pipelineDegraded = true
   const overNodeBudget = elementCount > MAX_PIPELINE_DOM_NODES
   if (overNodeBudget) pipelineDegraded = true
 
-  // 4. Phase 1: Mozilla Readability scoring
-  if (!overNodeBudget) {
+  const bodyText = doc.body?.textContent?.trim() ?? ''
+
+  // 3. Phase 1: Mozilla Readability scoring
+  if (!overNodeBudget && bodyText.length > 0) {
     try {
       const cloned = doc.cloneNode(true) as unknown as Document
       const reader = new Readability(cloned)
       const article = reader.parse()
       if (article && article.content && article.content.trim()) {
-        const targetText = doc.body?.textContent?.trim() ?? ''
         const articleText = article.textContent?.trim() ?? ''
 
         // Guard against Readability false-positives on catalogs, dashboards, portals, and feeds:
@@ -364,11 +395,11 @@ export function htmlToMarkdown(html: string, url: string): DenoiseResult {
         // portals, or feeds (like news homepages or model markets), Readability frequently
         // latches onto a footer/disclaimer widget and discards the vast majority of the
         // page's content. In such cases, prefer the cleaned document body / main container.
-        const isTinyArticleFraction = targetText.length > 1500 && (
-          (articleText.length * 3 < targetText.length && articleText.length < 1500) ||
-          (targetText.length > 3000 && articleText.length * 2.5 < targetText.length && articleText.length < 3500)
+        const isTinyArticleFraction = bodyText.length > 1500 && (
+          (articleText.length * 3 < bodyText.length && articleText.length < 1500) ||
+          (bodyText.length > 3000 && articleText.length * 2.5 < bodyText.length && articleText.length < 3500)
         )
-        const isCardHeavyBody = (doc.querySelectorAll?.('[class*="card"], [class*="item"], [class*="model"]').length ?? 0) >= 5 && articleText.length < 1000
+        const isCardHeavyBody = cardLikeCount >= 5 && articleText.length < 1000
 
         if (isTinyArticleFraction || isCardHeavyBody) {
           // Discard false positive article, allow fallback to cleaned document body
@@ -383,7 +414,7 @@ export function htmlToMarkdown(html: string, url: string): DenoiseResult {
     }
   }
 
-  // 5. Fallback to main container or whole body if Readability could not extract an article.
+  // 4. Fallback to main container or whole body if Readability could not extract an article.
   //
   // The container is the LARGEST matching one, not the first in document order:
   // a promo `<article>` near the top of a page (a badge, a carousel slide) is
@@ -401,14 +432,13 @@ export function htmlToMarkdown(html: string, url: string): DenoiseResult {
     }
   }
 
-  // 6. Phase 2: mdream high-performance LLM-optimized Markdown conversion
+  // 5. Phase 2: mdream high-performance LLM-optimized Markdown conversion
   let markdown = activeConverter(source).trim()
 
-  // 7. Collapse prose blank-line runs, leaving fenced code byte-exact
+  // 6. Collapse prose blank-line runs, leaving fenced code byte-exact
   markdown = collapseProseBlankLines(markdown).trim()
 
-  const rawText = (document as unknown as Document).body ? (document as unknown as Document).body.textContent?.trim() ?? '' : ''
-  if (rawText.length === 0 && !(document as unknown as Document).querySelector('img')) {
+  if (bodyText.length === 0 && !hasImg) {
     mode = 'document'
   }
 
