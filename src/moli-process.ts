@@ -38,11 +38,20 @@ export async function checkCdpEndpointHealthy(endpoint: string, timeoutMs = 1000
 }
 
 /**
+ * How long a verified live local daemon skips re-probing `/json/version` on
+ * subsequent `ensure()` calls. Process crashes clear `child`/`endpoint`
+ * immediately via the `exit`/`error` listeners, and the CDP connection pool
+ * maintains its own WebSocket liveness heartbeat.
+ */
+const HEALTH_CHECK_TTL_MS = 10_000
+
+/**
  * Manages the local Moli CDP daemon process (`moli serve`).
  */
 export class MoliProcessManager {
   private child: ChildProcess | undefined
   private endpoint: string | undefined
+  private lastHealthyAt = 0
   private starting: Promise<string> | undefined
   private startGeneration = 0
   private stderrBuffer: string[] = []
@@ -67,8 +76,15 @@ export class MoliProcessManager {
     }
 
     if (this.child && this.endpoint) {
-      const isLive = await checkCdpEndpointHealthy(this.endpoint, 500)
-      if (isLive) return this.endpoint
+      const alive = this.child.exitCode === null && this.child.signalCode === null
+      if (alive && Date.now() - this.lastHealthyAt < HEALTH_CHECK_TTL_MS) {
+        return this.endpoint
+      }
+      const isLive = alive && await checkCdpEndpointHealthy(this.endpoint, 500)
+      if (isLive) {
+        this.lastHealthyAt = Date.now()
+        return this.endpoint
+      }
       // Stale or dead process. Stop only this child; the manager remains
       // reusable so ensure() can recover by starting a fresh daemon.
       await this.stop()
@@ -113,6 +129,7 @@ export class MoliProcessManager {
           if (this.child === child) {
             this.child = undefined
             this.endpoint = undefined
+            this.lastHealthyAt = 0
           }
         })
 
@@ -120,6 +137,7 @@ export class MoliProcessManager {
           if (this.child === child) {
             this.child = undefined
             this.endpoint = undefined
+            this.lastHealthyAt = 0
           }
         })
 
@@ -173,6 +191,7 @@ export class MoliProcessManager {
           throw new Error('moli serve start was superseded by a stop() or a replacement; retry ensure() to join the live daemon')
         }
         this.endpoint = endpoint
+        this.lastHealthyAt = Date.now()
         return endpoint
       } finally {
         // Ownership check for the dedup slot: stop() clears `starting` while
@@ -196,6 +215,7 @@ export class MoliProcessManager {
     const child = this.child
     this.child = undefined
     this.endpoint = undefined
+    this.lastHealthyAt = 0
     this.starting = undefined
 
     if (!child) return

@@ -129,6 +129,45 @@ describe('Native CDP client failure cleanup', () => {
     await page.goto('https://origin.example.com/redirect', { timeout: 100 })
     expect(page.url()).toBe('https://final.example.com/article')
   })
+
+  it('resolves waitForLoadState(networkidle) cleanly within a 500ms budget without racing the timeout', async () => {
+    const { browser } = fakeBrowser(async () => ({}))
+    const context = new NativeCdpContext(browser)
+    const page = new NativeCdpPage(context, 'target-4', 'session-4')
+
+    // Simulate a request that just completed: the idle window scales inside the
+    // 500ms timeout (300ms) rather than racing 500ms vs 500ms.
+    page.handleEvent('Network.requestWillBeSent', { requestId: 'req-1' })
+    page.handleEvent('Network.loadingFinished', { requestId: 'req-1' })
+
+    const t0 = Date.now()
+    await expect(page.waitForLoadState('networkidle', { timeout: 500 })).resolves.toBeUndefined()
+    expect(Date.now() - t0).toBeLessThan(480)
+  })
+
+  it('resolves waitForLoadState(networkidle) immediately when network has already been idle', async () => {
+    const { browser } = fakeBrowser(async () => ({}))
+    const context = new NativeCdpContext(browser)
+    const page = new NativeCdpPage(context, 'target-5', 'session-5')
+    ;(page as unknown as { lastNetworkActivityAt: number }).lastNetworkActivityAt = Date.now() - 1_000
+
+    const t0 = Date.now()
+    await expect(page.waitForLoadState('networkidle', { timeout: 500 })).resolves.toBeUndefined()
+    expect(Date.now() - t0).toBeLessThan(50)
+  })
+
+  it('honors per-call timeoutMs on NativeCdpBrowser.send()', async () => {
+    const browser = new NativeCdpBrowser('ws://fake', 'ws://fake')
+    ;(browser as unknown as { ws: { send: () => void; close: () => void } }).ws = {
+      send: () => {},
+      close: () => {},
+    }
+    const t0 = Date.now()
+    await expect(browser.send('Page.navigate', { url: 'https://example.com' }, undefined, 40)).rejects.toThrow(
+      'CDP command timed out: Page.navigate',
+    )
+    expect(Date.now() - t0).toBeLessThan(500)
+  })
 })
 
 describe('Native CDP client heartbeat', () => {

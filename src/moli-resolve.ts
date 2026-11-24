@@ -425,18 +425,12 @@ export async function syncLatestMoliBinary(
   let lastCheckedTime = 0
   try {
     if (existsSync(stampFile)) {
-      const content = readFileSync(stampFile, 'utf-8').trim()
-      if (content.startsWith('{')) {
-        const parsed = JSON.parse(content) as { pluginVersion?: string; checkedAt?: number }
-        savedPluginVersion = parsed.pluginVersion ?? ''
-        lastCheckedTime = typeof parsed.checkedAt === 'number' ? parsed.checkedAt : 0
-      } else {
-        savedPluginVersion = content
-        lastCheckedTime = statSync(stampFile).mtimeMs
-      }
+      const parsed = JSON.parse(readFileSync(stampFile, 'utf-8').trim()) as { pluginVersion?: string; checkedAt?: number }
+      savedPluginVersion = parsed.pluginVersion ?? ''
+      lastCheckedTime = typeof parsed.checkedAt === 'number' ? parsed.checkedAt : 0
     }
   } catch {
-    // Ignore read errors
+    // Ignore read or malformed stamp errors
   }
 
   const now = Date.now()
@@ -531,31 +525,33 @@ export async function resolveMoliBinary(configuredPath = ''): Promise<string> {
     return envPath
   }
 
-  // 3. Automated check: ensure ~/.cache/moli/moli has latest release when plugin updates
-  await syncLatestMoliBinary()
-
-  // 4. Default official GitHub release location (~/.cache/moli/moli)
+  // 3. Default official GitHub release location (~/.cache/moli/moli).
+  // When an executable is already cached on disk, return it immediately and
+  // run the TTL/plugin-upgrade release check in the background so a slow
+  // GitHub check never stalls an active fetch.
   const userHome = homedir()
   const isWindows = process.platform === 'win32'
   const binName = isWindows ? 'moli.exe' : 'moli'
   const cachedMoli = join(userHome, '.cache', 'moli', binName)
   if (isExecutableFile(cachedMoli)) {
     resolvedMoliCache.set(trimmed, cachedMoli)
+    void syncLatestMoliBinary().catch(() => {})
     return cachedMoli
   }
 
-  // 5. System $PATH fallback (if pre-installed on system)
+  // 4. System $PATH fallback (if pre-installed on system)
   const onPath = findOnPath('moli')
   if (onPath !== undefined) {
     resolvedMoliCache.set(trimmed, onPath)
     return onPath
   }
 
-  // 6. Automated fallback: download latest official Moli release if missing
+  // 5. Automated fallback: download latest official Moli release if missing
   try {
     const downloaded = await downloadLatestMoliBinary()
     if (isExecutableFile(downloaded)) {
       resolvedMoliCache.set(trimmed, downloaded)
+      void syncLatestMoliBinary().catch(() => {})
       return downloaded
     }
   } catch (downloadErr: unknown) {

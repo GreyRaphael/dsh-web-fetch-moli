@@ -309,6 +309,17 @@ describe('MoliProcessManager disposal and cleanup', () => {
       expect(endpoint).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/)
       const healthy = await checkCdpEndpointHealthy(endpoint, 1_000)
       expect(healthy).toBe(true)
+
+      // Subsequent ensure() within the health-check TTL reuses the live daemon
+      // immediately without issuing another /json/version HTTP probe.
+      const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      try {
+        const reused = await manager.ensure(bin, 2)
+        expect(reused).toBe(endpoint)
+        expect(fetchSpy).not.toHaveBeenCalled()
+      } finally {
+        fetchSpy.mockRestore()
+      }
     } finally {
       await manager.stop()
     }

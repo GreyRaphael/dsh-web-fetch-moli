@@ -36,6 +36,9 @@ class CdpProtocolError extends Error {}
 /** How often the liveness heartbeat round-trips a cheap CDP command. */
 const HEARTBEAT_INTERVAL_MS = 15_000
 
+/** Default timeout (ms) for an individual CDP protocol command. */
+const DEFAULT_COMMAND_TIMEOUT_MS = 60_000
+
 /** Consecutive unanswered heartbeats before a half-open connection is declared dead. */
 const HEARTBEAT_MAX_MISSES = 2
 
@@ -143,7 +146,12 @@ export class NativeCdpBrowser implements CdpBrowser {
     this.startHeartbeat()
   }
 
-  async send(method: string, params: Record<string, unknown> = {}, sessionId?: string): Promise<unknown> {
+  async send(
+    method: string,
+    params: Record<string, unknown> = {},
+    sessionId?: string,
+    timeoutMs = DEFAULT_COMMAND_TIMEOUT_MS,
+  ): Promise<unknown> {
     if (this.isClosed) {
       throw new Error('Target closed')
     }
@@ -153,7 +161,7 @@ export class NativeCdpBrowser implements CdpBrowser {
       const timer = setTimeout(() => {
         this.pending.delete(id)
         reject(new Error(`CDP command timed out: ${method}`))
-      }, 60000)
+      }, timeoutMs)
 
       this.pending.set(id, { resolve, reject, timer })
 
@@ -253,7 +261,7 @@ export class NativeCdpBrowser implements CdpBrowser {
       this.heartbeatMisses = 0
     }
     this.heartbeatPending = true
-    this.send('Target.getTargets', {}).then(
+    this.send('Target.getTargets', {}, undefined, HEARTBEAT_INTERVAL_MS).then(
       () => {
         // Any answer — result or CDP-level error — proves the peer is alive.
         this.heartbeatPending = false
@@ -365,7 +373,8 @@ export class NativeCdpPage implements CdpPage {
   private loadFired = false
   private loadWaiters: Array<() => void> = []
   private inFlightRequests = new Set<string>()
-  private networkIdleWaiters: Array<() => void> = []
+  private lastNetworkActivityAt = Date.now()
+  private networkIdleWaiters: Array<{ resolve: () => void; idleMs: number }> = []
   private networkIdleTimer: NodeJS.Timeout | null = null
 
   constructor(
@@ -390,13 +399,13 @@ export class NativeCdpPage implements CdpPage {
   }
 
   async init(): Promise<void> {
-    await Promise.all([
+    const [, , , tree] = await Promise.all([
       this.send('Page.enable'),
       this.send('Runtime.enable'),
       this.send('Network.enable'),
+      this.send('Page.getFrameTree') as Promise<{ frameTree?: { frame?: { id?: string; url?: string } } }>,
     ])
 
-    const tree = await this.send('Page.getFrameTree') as { frameTree?: { frame?: { id?: string; url?: string } } }
     if (tree?.frameTree?.frame?.id) {
       this.mainFrameId = tree.frameTree.frame.id
       if (tree.frameTree.frame.url) {
@@ -405,9 +414,9 @@ export class NativeCdpPage implements CdpPage {
     }
   }
 
-  async send(method: string, params: Record<string, unknown> = {}): Promise<unknown> {
+  async send(method: string, params: Record<string, unknown> = {}, timeoutMs?: number): Promise<unknown> {
     if (this.isClosed) throw new Error('Target closed')
-    return this.ctx.browser.send(method, params, this.sessionId)
+    return this.ctx.browser.send(method, params, this.sessionId, timeoutMs)
   }
 
   async captureScreenshot(options?: {
@@ -443,6 +452,7 @@ export class NativeCdpPage implements CdpPage {
     this.domContentLoaded = false
     this.loadFired = false
     this.inFlightRequests.clear()
+    this.lastNetworkActivityAt = Date.now()
     if (this.networkIdleTimer) {
       clearTimeout(this.networkIdleTimer)
       this.networkIdleTimer = null
@@ -468,30 +478,35 @@ export class NativeCdpPage implements CdpPage {
       lifecycleDone = true
       resolveLifecycle()
     }
-    const waiterList = waitUntil === 'domcontentloaded'
-      ? this.domContentWaiters
-      : waitUntil === 'networkidle'
-        ? this.networkIdleWaiters
-        : this.loadWaiters
+    let networkIdleWaiter: { resolve: () => void; idleMs: number } | undefined
 
     const removeLifecycleWaiter = () => {
-      const index = waiterList.indexOf(onDone)
-      if (index !== -1) waiterList.splice(index, 1)
+      if (waitUntil === 'domcontentloaded') {
+        const index = this.domContentWaiters.indexOf(onDone)
+        if (index !== -1) this.domContentWaiters.splice(index, 1)
+      } else if (waitUntil === 'load') {
+        const index = this.loadWaiters.indexOf(onDone)
+        if (index !== -1) this.loadWaiters.splice(index, 1)
+      } else if (networkIdleWaiter !== undefined) {
+        const index = this.networkIdleWaiters.indexOf(networkIdleWaiter)
+        if (index !== -1) this.networkIdleWaiters.splice(index, 1)
+      }
     }
 
     if (waitUntil === 'domcontentloaded') {
       if (this.domContentLoaded) onDone()
-      else waiterList.push(onDone)
+      else this.domContentWaiters.push(onDone)
     } else if (waitUntil === 'load') {
       if (this.loadFired) onDone()
-      else waiterList.push(onDone)
+      else this.loadWaiters.push(onDone)
     } else {
-      waiterList.push(onDone)
+      networkIdleWaiter = { resolve: onDone, idleMs: Math.min(500, Math.max(100, Math.floor(timeout * 0.6))) }
+      this.networkIdleWaiters.push(networkIdleWaiter)
       this.checkNetworkIdle()
     }
 
     try {
-      const navRes = await this.send('Page.navigate', { url }) as { frameId?: string; errorText?: string }
+      const navRes = await this.send('Page.navigate', { url }, Math.max(timeout, 5_000)) as { frameId?: string; errorText?: string }
       if (navRes?.errorText) {
         throw new Error(`cannot navigate to ${url}: ${navRes.errorText}`)
       }
@@ -501,7 +516,7 @@ export class NativeCdpPage implements CdpPage {
       // delays or misses emitting Page.domContentEventFired / Page.loadEventFired.
       let inFlight = false
       pollTimer = setInterval(async () => {
-        if (inFlight || this.isClosed) return
+        if (lifecycleDone || inFlight || this.isClosed) return
         inFlight = true
         try {
           const evalPromise = this.evaluate(`
@@ -572,6 +587,7 @@ export class NativeCdpPage implements CdpPage {
     let pollTimer: NodeJS.Timeout | null = null
 
     await new Promise<void>((resolve, reject) => {
+      let networkIdleWaiter: { resolve: () => void; idleMs: number } | undefined
       const timer = setTimeout(() => {
         if (pollTimer) clearInterval(pollTimer)
         if (state === 'domcontentloaded') {
@@ -580,8 +596,8 @@ export class NativeCdpPage implements CdpPage {
         } else if (state === 'load') {
           const idx = this.loadWaiters.indexOf(onDone)
           if (idx !== -1) this.loadWaiters.splice(idx, 1)
-        } else if (state === 'networkidle') {
-          const idx = this.networkIdleWaiters.indexOf(onDone)
+        } else if (state === 'networkidle' && networkIdleWaiter !== undefined) {
+          const idx = this.networkIdleWaiters.indexOf(networkIdleWaiter)
           if (idx !== -1) this.networkIdleWaiters.splice(idx, 1)
         }
         reject(new Error(`Timeout of ${timeout}ms exceeded waiting for "${state}"`))
@@ -631,23 +647,33 @@ export class NativeCdpPage implements CdpPage {
           }
         }, 250)
       } else if (state === 'networkidle') {
-        this.networkIdleWaiters.push(onDone)
+        const idleMs = Math.min(500, Math.max(100, Math.floor(timeout * 0.6)))
+        networkIdleWaiter = { resolve: onDone, idleMs }
+        this.networkIdleWaiters.push(networkIdleWaiter)
         this.checkNetworkIdle()
       }
     })
   }
 
   private checkNetworkIdle(): void {
-    if (this.inFlightRequests.size <= 2 && this.networkIdleWaiters.length > 0) {
-      if (!this.networkIdleTimer) {
-        this.networkIdleTimer = setTimeout(() => {
-          this.networkIdleTimer = null
-          if (this.inFlightRequests.size <= 2) {
-            const waiters = this.networkIdleWaiters.splice(0)
-            for (const w of waiters) w()
-          }
-        }, 500)
+    if (this.inFlightRequests.size > 2 || this.networkIdleWaiters.length === 0) return
+    const elapsedIdle = Math.max(0, Date.now() - this.lastNetworkActivityAt)
+    let nextDelay = Infinity
+    for (let i = this.networkIdleWaiters.length - 1; i >= 0; i--) {
+      const waiter = this.networkIdleWaiters[i]!
+      const remaining = waiter.idleMs - elapsedIdle
+      if (remaining <= 0) {
+        this.networkIdleWaiters.splice(i, 1)
+        waiter.resolve()
+      } else if (remaining < nextDelay) {
+        nextDelay = remaining
       }
+    }
+    if (nextDelay < Infinity && !this.networkIdleTimer) {
+      this.networkIdleTimer = setTimeout(() => {
+        this.networkIdleTimer = null
+        this.checkNetworkIdle()
+      }, nextDelay)
     }
   }
 
@@ -761,6 +787,7 @@ export class NativeCdpPage implements CdpPage {
       const reqId = params.requestId as string | undefined
       if (reqId) {
         this.inFlightRequests.add(reqId)
+        this.lastNetworkActivityAt = Date.now()
         if (this.networkIdleTimer) {
           clearTimeout(this.networkIdleTimer)
           this.networkIdleTimer = null
@@ -770,6 +797,7 @@ export class NativeCdpPage implements CdpPage {
       const reqId = params.requestId as string | undefined
       if (reqId) {
         this.inFlightRequests.delete(reqId)
+        this.lastNetworkActivityAt = Date.now()
         this.checkNetworkIdle()
       }
     }
@@ -785,7 +813,7 @@ export class NativeCdpPage implements CdpPage {
     this.networkIdleWaiters = []
     this.inFlightRequests.clear()
     this.ctx.browser.unregisterSession(this.sessionId, this.targetId)
-    await this.ctx.browser.send('Target.closeTarget', { targetId: this.targetId }).catch(() => {})
+    await this.ctx.browser.send('Target.closeTarget', { targetId: this.targetId }, undefined, 2_000).catch(() => {})
   }
 }
 
