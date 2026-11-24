@@ -318,6 +318,11 @@ function withDefaults(config: ResolvedConfig | undefined): ResolvedConfig {
 
 export class MoliFetchProvider implements WebFetchProvider {
   readonly id = MOLI_FETCH_PROVIDER_ID
+  readonly title = 'Moli'
+  readonly description: NonNullable<WebFetchProvider['description']> = {
+    en: 'Local lightweight Rust headless browser (Moli) over CDP. Renders JavaScript SPAs, micro-frontends, and infinite-scroll pages into clean Markdown.',
+    zh: '基于本地轻量 Rust 无头浏览器（Moli）与 CDP 渲染。支持 JavaScript SPA、微前端与无限滚动页面，并自动去噪转为 Markdown。',
+  }
 
   available(): boolean {
     return true
@@ -587,9 +592,36 @@ export class MoliFetchProvider implements WebFetchProvider {
       await page.evaluate(`
         ((maxWait) => {
           return new Promise((resolve) => {
-            const isSettled = () => {
+            const startedAt = Date.now();
+            let lastMutationAt = startedAt;
+
+            const hasActiveSpinner = () => {
+              const spinners = document.querySelectorAll(
+                '.ant-spin, .anticon-spin, [class*="spin" i], [class*="skeleton" i], [class*="loading" i]'
+              );
+              for (let i = 0; i < spinners.length; i++) {
+                const s = spinners[i];
+                if (s.closest('header, nav')) continue;
+                if (s.offsetWidth > 0 || s.offsetHeight > 0 || s.getClientRects().length > 0) return true;
+              }
+              return false;
+            };
+
+            const getMeaningfulText = (el) => {
+              if (!el) return 0;
+              const paragraphs = el.querySelectorAll('p, li, article, h1, h2, h3, tr, td');
+              if (paragraphs.length >= 2) {
+                let sum = 0;
+                for (let i = 0; i < paragraphs.length; i++) sum += (paragraphs[i].textContent || '').trim().length;
+                return sum;
+              }
+              return (el.innerText || el.textContent || '').trim().length;
+            };
+
+            // Returns: 'ready' (rich content mounted), 'quiet' (short/static page finished), or 'wait'
+            const checkState = () => {
               const body = document.body;
-              if (!body) return false;
+              if (!body) return 'wait';
 
               // Exclude header and navigation chrome to prevent false positives (e.g. category navbars)
               const cards = document.querySelectorAll(
@@ -603,56 +635,56 @@ export class MoliFetchProvider implements WebFetchProvider {
                 '[class*="sentinel" i], [class*="loadmore" i], [class*="load-more" i], [class*="infinite" i]'
               ));
 
-              // 1. Settled if feed/cards or infinite sentinels have mounted into DOM
-              if (cards >= 5 || sentinel) return true;
-
-              const getMeaningfulText = (el) => {
-                if (!el) return 0;
-                const paragraphs = el.querySelectorAll('p, li, article, h1, h2, h3, tr, td');
-                if (paragraphs.length >= 2) {
-                  let sum = 0;
-                  for (let i = 0; i < paragraphs.length; i++) sum += (paragraphs[i].textContent || '').trim().length;
-                  return sum;
-                }
-                return (el.innerText || el.textContent || '').trim().length;
-              };
+              // 1. Settled if infinite sentinel mounted, or real non-skeleton cards mounted
+              if (sentinel) return 'ready';
+              if (cards >= 5 && !hasActiveSpinner()) return 'ready';
 
               // 2. In SPA root containers (#root, #app), require root-internal meaningful content
               const root = document.querySelector('#root, #app, [id*="root"]');
               if (root) {
                 const rootTextLen = getMeaningfulText(root);
                 const hasContent = cards > 0 || Boolean(root.querySelector('table, article, .markdown-body, [class*="content" i]'));
-                if (rootTextLen > 300 && hasContent) return true;
-                return false;
+                if (rootTextLen > 300 && hasContent) return 'ready';
+                if (
+                  rootTextLen > 0
+                  && document.readyState === 'complete'
+                  && !hasActiveSpinner()
+                  && (Date.now() - lastMutationAt) >= 1200
+                ) {
+                  return 'quiet';
+                }
+                return 'wait';
               }
 
               // 3. In main/article containers, require meaningful prose/table text
               const main = document.querySelector('main, article, [role="main"], .markdown-body, .docs-content');
               if (main) {
                 const mainTextLen = getMeaningfulText(main);
-                if (mainTextLen > 180 || main.querySelectorAll('table, p, li').length >= 2 || main.querySelector('article')) return true;
+                if (mainTextLen > 180 || main.querySelectorAll('table, p, li').length >= 2 || main.querySelector('article')) return 'ready';
               }
 
               // 4. Static or document page fallback
               const text = (body.innerText || body.textContent || '').trim();
               const hasArticle = Boolean(document.querySelector('article, main, tr, table'));
-              if (hasArticle && text.length > 300) return true;
-              if (text.length > 600) return true;
+              if (hasArticle && text.length > 300) return 'ready';
+              if (text.length > 600) return 'ready';
 
-              // 5. If none of the content criteria are satisfied, check if active spinner/skeleton is present
-              const spinners = document.querySelectorAll(
-                '.ant-spin, .anticon-spin, [class*="spin" i], [class*="skeleton" i], [class*="loading" i]'
-              );
-              for (let i = 0; i < spinners.length; i++) {
-                const s = spinners[i];
-                if (s.closest('header, nav')) continue;
-                if (s.offsetWidth > 0 || s.offsetHeight > 0 || s.getClientRects().length > 0) return false;
+              // 5. Active spinner/skeleton means the page is still loading
+              if (hasActiveSpinner()) return 'wait';
+
+              // 6. Short static/document page that finished loading with no spinners and no DOM mutations:
+              // settle promptly instead of burning the full 25s safety timer.
+              if (document.readyState === 'complete') {
+                const quietMs = Date.now() - lastMutationAt;
+                if (text.length > 0 && quietMs >= 250) return 'quiet';
+                if (text.length === 0 && !document.querySelector('script') && quietMs >= 200) return 'quiet';
               }
 
-              return false;
+              return 'wait';
             };
 
-            if (isSettled()) return resolve(true);
+            const initial = checkState();
+            if (initial === 'ready' || initial === 'quiet') return resolve(true);
 
             let debounceTimer = null;
             let observer = null;
@@ -671,7 +703,12 @@ export class MoliFetchProvider implements WebFetchProvider {
             };
 
             const check = () => {
-              if (isSettled()) {
+              const state = checkState();
+              if (state === 'quiet') {
+                finish();
+                return;
+              }
+              if (state === 'ready') {
                 if (debounceTimer) clearTimeout(debounceTimer);
                 debounceTimer = setTimeout(finish, 60);
               }
@@ -679,7 +716,10 @@ export class MoliFetchProvider implements WebFetchProvider {
 
             const target = document.body || document.documentElement;
             if (typeof MutationObserver !== 'undefined' && target) {
-              observer = new MutationObserver(check);
+              observer = new MutationObserver(() => {
+                lastMutationAt = Date.now();
+                check();
+              });
               observer.observe(target, { childList: true, subtree: true });
             }
 
@@ -700,15 +740,20 @@ export class MoliFetchProvider implements WebFetchProvider {
   private async runSentinelRounds(page: CdpPage, deadline: Deadline): Promise<void> {
     if (typeof page.evaluate !== 'function') return
 
-    // Quick check: if the page is a large static article or documentation without sentinels,
-    // skip scrolling to save latency.
+    // Quick check: skip scrolling on static articles, documentation, or tiny static pages
+    // that have no infinite-scroll sentinels, grids/feeds, or card catalogs.
     const skipScroll = await page.evaluate(`
       (() => {
         const hasSentinel = Boolean(document.querySelector('${SENTINEL_SELECTOR}'));
         if (hasSentinel) return false;
         const hasGridOrFeed = Boolean(document.querySelector('[role="feed"], [class*="grid" i]'));
         if (hasGridOrFeed) return false;
-        const textLen = (document.body?.innerText || document.body?.textContent || '').trim().length;
+        const cardsCount = document.querySelectorAll('${CARD_ITEMS_SELECTOR}').length;
+        if (cardsCount >= 5) return false;
+        const body = document.body;
+        if (!body) return true;
+        if (cardsCount === 0 && body.getElementsByTagName('*').length < 40) return true;
+        const textLen = (body.innerText || body.textContent || '').trim().length;
         const article = document.querySelector('article, main, .markdown-body, .docs-content');
         const articleTextLen = article ? (article.innerText || article.textContent || '').trim().length : 0;
         return textLen > 600 && articleTextLen > 300;
@@ -778,34 +823,43 @@ export class MoliFetchProvider implements WebFetchProvider {
       }
 
       // 4. Adaptive event-driven wait for new batch to load and settle into DOM
-      const maxWait = Math.min(800, Math.max(250, deadline.remainingMs() - 4000))
-      await this.waitForSentinelBatch(page, res.cardsCount, res.htmlLength, maxWait)
+      const roundBudget = (round <= 2 || res.hasSentinel) ? 800 : 500
+      const maxWait = Math.min(roundBudget, Math.max(250, deadline.remainingMs() - 4000))
+      const grew = await this.waitForSentinelBatch(page, res.cardsCount, res.htmlLength, maxWait)
+      if (!grew && everHadSentinel && !res.hasSentinel) {
+        break
+      }
     }
   }
 
   /**
    * Adaptive event-driven wait: listens for DOM mutations and card/content growth
-   * with a short debounce (80ms) rather than a blind static sleep.
+   * with a short debounce (60ms) rather than a blind static sleep.
+   * Returns true when DOM/card change was observed, false if the wait timed out unchanged.
    */
   private async waitForSentinelBatch(
     page: CdpPage,
     prevCards: number,
     prevHtmlLen: number,
     maxWaitMs: number,
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (typeof page.evaluate !== 'function' || maxWaitMs <= 50) {
       await sleep(Math.min(maxWaitMs, 250))
-      return
+      return false
     }
 
     try {
-      await page.evaluate(`
+      const grew = await page.evaluate(`
         ((prevCards, prevLen, maxWait) => {
           return new Promise((resolve) => {
             const getCards = () => document.querySelectorAll(
               '${CARD_ITEMS_SELECTOR}'
             ).length;
-            const getLen = () => (document.documentElement ? document.documentElement.outerHTML.length : 0);
+            const getDomSize = () => {
+              const nodes = document.getElementsByTagName('*').length;
+              const text = document.body ? (document.body.textContent || '').length : 0;
+              return nodes * 32 + text;
+            };
 
             let debounceTimer = null;
             let pollInterval = null;
@@ -813,43 +867,55 @@ export class MoliFetchProvider implements WebFetchProvider {
             let observer = null;
             let settled = false;
             let growthDetected = false;
+            let checkScheduled = false;
 
-            const finish = () => {
+            const finish = (didGrow) => {
               if (settled) return;
               settled = true;
               if (observer) observer.disconnect();
               if (pollInterval) clearInterval(pollInterval);
               if (safetyTimer) clearTimeout(safetyTimer);
               if (debounceTimer) clearTimeout(debounceTimer);
-              resolve(true);
+              resolve(didGrow);
             };
 
             const check = () => {
+              checkScheduled = false;
               if (settled) return;
               const curCards = getCards();
-              const curLen = getLen();
-              if (curCards > prevCards || curLen > prevLen + 80) {
-                // Batch growth detected: debounce 80ms to allow current batch render to settle
+              const changed = prevCards >= 5
+                ? curCards !== prevCards
+                : (curCards > prevCards || getDomSize() > prevLen + 80);
+              if (changed) {
+                // Batch update detected: debounce 60ms to allow current batch render to settle
                 if (!growthDetected) {
                   growthDetected = true;
-                  debounceTimer = setTimeout(finish, 80);
+                  debounceTimer = setTimeout(() => finish(true), 60);
                 }
               }
             };
 
+            const scheduleCheck = () => {
+              if (settled || checkScheduled) return;
+              checkScheduled = true;
+              setTimeout(check, 16);
+            };
+
             const target = document.body || document.documentElement;
             if (typeof MutationObserver !== 'undefined' && target) {
-              observer = new MutationObserver(check);
+              observer = new MutationObserver(scheduleCheck);
               observer.observe(target, { childList: true, subtree: true });
             }
 
-            pollInterval = setInterval(check, 25);
-            safetyTimer = setTimeout(finish, maxWait);
+            pollInterval = setInterval(check, 120);
+            safetyTimer = setTimeout(() => finish(growthDetected), maxWait);
           });
         })(${prevCards}, ${prevHtmlLen}, ${maxWaitMs})
       `)
+      return grew === true
     } catch {
       await sleep(Math.min(maxWaitMs, 250))
+      return false
     }
   }
 

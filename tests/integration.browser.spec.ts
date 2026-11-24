@@ -15,6 +15,8 @@ const PAGE = `<!doctype html><html><head><title>Smoke page</title></head><body>
 <footer>footer noise</footer>
 </body></html>`
 
+const SHORT_STATIC_PAGE = `<!doctype html><html><head><title>Short</title></head><body><p>Hello world</p></body></html>`
+
 const COOKIE_PAGE_SEEN = `<!doctype html><html><head><title>Probe</title></head><body>
 <main><article><h1>Cookie probe COOKIE-SEEN</h1><p>The shared context carried the cookie this far.</p><p>A second paragraph so the article extractor locks onto the main content region.</p></article></main>
 </body></html>`
@@ -115,6 +117,11 @@ beforeAll(async () => {
       }
       return
     }
+    if (url.startsWith('/short')) {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(SHORT_STATIC_PAGE)
+      return
+    }
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
     res.end(PAGE)
   })
@@ -161,6 +168,35 @@ describe('MoliFetchProvider Local CDP integration', () => {
       const content = result.body.kind === 'text' ? result.body.content : ''
       expect(content).toMatch(/^# (Smoke page|Smoke heading)\b/m)
       expect(content).toContain('The rendered body text.')
+    } finally {
+      await provider.dispose()
+    }
+  })
+
+  it('settles a short static page promptly instead of hanging the 25s SPA settle window', { timeout: 15_000 }, async () => {
+    if (!moliAvailable) return
+
+    const provider = new MoliFetchProvider(() => ({
+      backend: 'local',
+      moliPath,
+      cdpEndpoint: '',
+      shareBrowserContext: true,
+      bypassCsp: true,
+      ignoreCertificateErrors: false,
+      autoScrollSentinel: true,
+      denoise: true,
+      maxConcurrency: 4,
+      challengeWaitMs: 0,
+      challengeRetries: 0,
+    }))
+    try {
+      const t0 = Date.now()
+      const result = await provider.fetch({ url: `${baseUrl}short` })
+      const elapsed = Date.now() - t0
+      expect(result.statusCode).toBe(200)
+      expect(result.body.kind).toBe('text')
+      expect(result.body.content).toContain('Hello world')
+      expect(elapsed).toBeLessThan(5_000)
     } finally {
       await provider.dispose()
     }

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import WebRuntime from '@deepseek-ai/dsh-web'
@@ -128,6 +129,34 @@ describe('dsh-web-fetch-moli Cordis integration', () => {
     // reading — a captured snapshot would leave it at `firstBudget` forever.
     expect(toolDef.timeoutMs).toBeGreaterThan(120_000)
     expect(toolDef.timeoutMs).not.toBe(firstBudget)
+
+    // Lowering the setting back down also lowers the active tool budget instead of staying stuck high.
+    live.current = Config({ backend: 'cdp', timeoutMs: 45_000 })
+    await (ctx as any).waterfall('tools/execute', { name: 'web_fetch' }, async () => ({ status: 200 }))
+    expect(toolDef.timeoutMs).toBe(50_000)
+  })
+
+  it('publishes title and localized description through ctx.web.listProviders() (dsh >= 0.2.2-rc.5)', async () => {
+    const ctx = new Context()
+    await ctx.plugin(WebRuntime, { fetchProvider: 'moli' })
+    apply(ctx, { backend: 'cdp' } as Config)
+
+    const listed = ctx.web.listProviders()
+    const moli = listed.fetch.find(entry => entry.id === MOLI_FETCH_PROVIDER_ID)
+    expect(moli).toBeDefined()
+    expect(moli?.title).toBe('Moli')
+    expect(typeof moli?.description).toBe('object')
+    if (typeof moli?.description === 'object' && moli.description !== null) {
+      expect(moli.description.en).toBeTruthy()
+      expect(moli.description.zh).toBeTruthy()
+    }
+  })
+
+  it('cordis.patch.yml targets dsh >= 0.2.2-rc.5 without overriding searchProvider or host tool-web', () => {
+    const patch = readFileSync(new URL('../cordis.patch.yml', import.meta.url), 'utf-8')
+    expect(patch).toContain('fetchProvider: moli')
+    expect(patch).not.toMatch(/^\s*searchProvider:/m)
+    expect(patch).not.toMatch(/^\s*-\s*id:\s*tool-web\b/m)
   })
 
   it('falls back to the documented defaults in a direct mount that omits fields', () => {

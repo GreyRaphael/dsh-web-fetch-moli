@@ -134,11 +134,17 @@ export async function scrollIntoViewNative(page: CdpPage): Promise<NativeScrollR
           target.scrollIntoView({ block: 'end', inline: 'nearest' });
           scrolled = true;
         }
+        let htmlLength = 0;
+        if (cards.length < 5) {
+          const nodeCount = document.getElementsByTagName('*').length;
+          const textLen = document.body ? (document.body.textContent || '').length : 0;
+          htmlLength = nodeCount * 32 + textLen;
+        }
         return {
           cardsCount: cards.length,
           hasSentinel: Boolean(sentinel),
           scrolled,
-          htmlLength: document.documentElement ? document.documentElement.outerHTML.length : 0,
+          htmlLength,
         };
       })()
     `)
